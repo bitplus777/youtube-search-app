@@ -787,6 +787,8 @@ def main():
         st.session_state.results = []
     if "api_keys_raw" not in st.session_state:
         st.session_state.api_keys_raw = ["", "", "", "", ""]
+    if "my_keywords" not in st.session_state:
+        st.session_state.my_keywords = []   # 나만의 키워드 목록
 
     t = THEMES[st.session_state.theme]
     st.markdown(build_css(t), unsafe_allow_html=True)
@@ -896,9 +898,9 @@ def main():
         )
         mode = st.radio(
             "검색 모드",
-            ["🔎 빠른 검색", "🗂 키워드 DB 검색"],
+            ["🔎 빠른 검색", "📝 나만의 키워드", "🗂 키워드 DB 검색"],
             label_visibility="collapsed",
-            help="빠른 검색: 단일 키워드 / DB 검색: 언어·카테고리 선택 후 대량 검색",
+            help="빠른 검색: 단일 키워드 | 나만의 키워드: 원하는 키워드를 직접 추가 | DB 검색: 대량 검색",
         )
 
         st.markdown("<hr style='border-color:" + t['divider'] + ";margin:12px 0'>",
@@ -925,6 +927,105 @@ def main():
                 pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
             pages_arg = pages_qs
             search_clicked = st.button("🔍 검색 시작", type="primary", use_container_width=True)
+
+        elif mode == "📝 나만의 키워드":
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:800;margin-bottom:4px;'>📝 나만의 키워드 목록</div>"
+                f"<div style='font-size:11px;color:{t['sub']};margin-bottom:10px;'>키워드를 입력하고 추가 버튼을 누르세요. 각 키워드별로 따로 검색합니다.</div>",
+                unsafe_allow_html=True,
+            )
+
+            # ── 키워드 입력 ──
+            kw_col, add_col = st.columns([5, 2])
+            with kw_col:
+                new_kw = st.text_input(
+                    "키워드 입력",
+                    placeholder="예: vlog in korea",
+                    label_visibility="collapsed",
+                    key="my_kw_input",
+                )
+            with add_col:
+                add_clicked = st.button("➕ 추가", use_container_width=True, key="my_kw_add")
+
+            if add_clicked and new_kw.strip():
+                kw_clean = new_kw.strip()
+                if kw_clean not in st.session_state.my_keywords:
+                    st.session_state.my_keywords.append(kw_clean)
+                st.rerun()
+
+            # ── 키워드 목록 표시 ──
+            my_kws = st.session_state.my_keywords
+            if my_kws:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{t['sub']};margin-bottom:6px;'>"
+                    f"등록된 키워드 <b style='color:{t['text']}'>{len(my_kws)}개</b></div>",
+                    unsafe_allow_html=True,
+                )
+                for idx_k, kw_item in enumerate(my_kws):
+                    kc1, kc2 = st.columns([7, 1])
+                    with kc1:
+                        st.markdown(
+                            f"<div style='background:{t['card_bg']};border:1px solid {t['divider']};"
+                            f"border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;"
+                            f"color:{t['text']};margin-bottom:4px;overflow:hidden;"
+                            f"text-overflow:ellipsis;white-space:nowrap;' title='{kw_item}'>"
+                            f"🔖 {kw_item}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with kc2:
+                        if st.button("✕", key=f"del_kw_{idx_k}", use_container_width=True,
+                                     help=f"'{kw_item}' 삭제"):
+                            st.session_state.my_keywords.pop(idx_k)
+                            st.rerun()
+
+                if st.button("🗑 전체 삭제", use_container_width=True, key="clear_all_kws"):
+                    st.session_state.my_keywords = []
+                    st.rerun()
+            else:
+                st.markdown(
+                    f"<div style='text-align:center;padding:20px 0;color:{t['sub']};font-size:13px;'>"
+                    "키워드를 추가해 보세요</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()),
+                                           key="my_dur")
+            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()), key="my_sort")
+            pages_mk = st.slider("키워드당 페이지 수", 1, 4, 1,
+                                  help="1페이지=50개, 4페이지=200개/키워드",
+                                  key="my_pages")
+            max_results = pages_mk * 50
+            pages_arg = pages_mk
+
+            published_days = st.selectbox("업로드 기간",
+                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"], key="my_pub")
+            pub_after = None
+            if published_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+                pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            kw_count_my = len(my_kws)
+            if kw_count_my:
+                est_my = kw_count_my * max_results
+                st.markdown(
+                    f"<div style='background:{t['card_bg']};border:1px solid {t['divider']};"
+                    f"border-radius:8px;padding:8px 12px;font-size:12px;color:{t['sub']};margin:6px 0'>"
+                    f"🔍 <b style='color:{t['text']}'>{kw_count_my}개</b> 키워드 × "
+                    f"<b style='color:{t['text']}'>{pages_mk}페이지</b> = 최대 "
+                    f"<b style='color:#ff0000'>~{est_my}개</b> 결과</div>",
+                    unsafe_allow_html=True,
+                )
+
+            search_clicked = st.button(
+                "🚀 내 키워드로 검색",
+                type="primary",
+                use_container_width=True,
+                disabled=(kw_count_my == 0),
+                key="my_kw_search",
+            )
+            keyword_input = ""
+            selected_kws = []
 
         else:
             st.markdown(
@@ -1052,6 +1153,11 @@ def main():
                 st.warning("검색어를 입력해 주세요.")
                 st.stop()
             keywords_to_search = [keyword_input.strip()]
+        elif mode == "📝 나만의 키워드":
+            if not st.session_state.my_keywords:
+                st.warning("사이드바에 키워드를 1개 이상 추가해 주세요.")
+                st.stop()
+            keywords_to_search = list(st.session_state.my_keywords)
         else:
             if not selected_kws:
                 st.warning("언어 또는 카테고리를 선택해 주세요.")
@@ -1139,6 +1245,11 @@ def main():
         with st.spinner(f"📥 {len(all_ids)}개 영상 상세정보 수집 중..."):
             try:
                 rows = fetch_details(youtube, list(all_ids.keys()))
+                # 각 결과에 검색 키워드 태깅
+                for row in rows:
+                    vid_url = row["URL"]
+                    vid_id = vid_url.split("v=")[-1] if "v=" in vid_url else vid_url.split("/")[-1]
+                    row["_search_kw"] = all_ids.get(vid_id, "")
             except HttpError as e:
                 err = _classify_api_error(str(e))
                 st.error(err["msg"])
@@ -1161,6 +1272,13 @@ def main():
         rows.sort(key=lambda r: (grade_order[r["등급"]], r["업로드경과일"]))
 
         st.session_state.results = rows
+        st.session_state["last_kw_stats"] = {}
+        if mode in ("📝 나만의 키워드", "🔎 빠른 검색"):
+            # 키워드별 결과 수 계산
+            kw_stat: dict[str, int] = {}
+            for row in rows:
+                kw_stat[row.get("_search_kw", "기타")] = kw_stat.get(row.get("_search_kw", "기타"), 0) + 1
+            st.session_state["last_kw_stats"] = kw_stat
 
     # ── 결과 표시 ─────────────────────────────────────────────────────────────
     with main_tab:
@@ -1204,6 +1322,22 @@ def main():
             render_grade_summary(rows, t)
 
             total_count = len(rows)
+
+            # ── 키워드별 결과 수 (나만의 키워드 모드일 때) ──
+            kw_stats = st.session_state.get("last_kw_stats", {})
+            if kw_stats and len(kw_stats) > 1:
+                badges = "".join([
+                    f"<span style='background:{t['card_bg']};border:1px solid {t['divider']};"
+                    f"border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;"
+                    f"color:{t['text']};white-space:nowrap;'>"
+                    f"🔖 {kw} <b style='color:#ff0000'>{cnt}개</b></span>"
+                    for kw, cnt in kw_stats.items()
+                ])
+                st.markdown(
+                    f"<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;'>"
+                    f"{badges}</div>",
+                    unsafe_allow_html=True,
+                )
 
             # 저장 + 정보 행
             save_col, info_col = st.columns([3, 7])
