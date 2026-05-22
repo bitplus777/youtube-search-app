@@ -37,9 +37,9 @@ GRADES = {
     "B": {"label":"B급","icon":"🌱","color":"#4CAF50","bg":"#071507","border":"#4CAF50",
           "desc":"구독자 20만↓ · 90일↓","badge":"background:linear-gradient(135deg,#4CAF50,#2E7D32);color:#fff;",
           "glow":"0 0 18px rgba(76,175,80,0.2)","badge_text_color":"#fff"},
-    "C": {"label":"C급","icon":"📺","color":"#9E9E9E","bg":"#141414","border":"#444",
-          "desc":"대형 채널 또는 오래된 영상","badge":"background:linear-gradient(135deg,#555,#333);color:#ccc;",
-          "glow":"none","badge_text_color":"#ccc"},
+    "C": {"label":"C급","icon":"📺","color":"#B0BEC5","bg":"#101418","border":"#546E7A",
+          "desc":"대형 채널 또는 오래된 영상","badge":"background:linear-gradient(135deg,#546E7A,#37474F);color:#fff;",
+          "glow":"0 0 14px rgba(84,110,122,0.35)","badge_text_color":"#fff"},
 }
 
 DURATION_FILTERS = {"전체":None,"짧은 영상 (4분 미만)":"short","중간 영상 (4~20분)":"medium","긴 영상 (20분 초과)":"long"}
@@ -247,17 +247,13 @@ div[data-baseweb="select"]>div{
 }
 
 /* ── 등급 요약 ── */
-.grade-summary{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:14px;margin-bottom:24px;
-}
 .grade-box{
   border-radius:18px;
   padding:22px 14px 18px;text-align:center;
   border:2px solid;
   position:relative;overflow:hidden;
-  cursor:default;
+  cursor:pointer;
+  transition:transform .2s,box-shadow .2s;
 }
 .grade-box::before{
   content:'';position:absolute;inset:0;
@@ -268,10 +264,35 @@ div[data-baseweb="select"]>div{
   animation-name:snake-shine;
   pointer-events:none;
 }
-.grade-box:hover{ filter:brightness(1.15)!important; transform:translateY(-4px)!important; }
+.grade-box:hover{ filter:brightness(1.18); transform:translateY(-5px); }
 .grade-count{font-size:36px;font-weight:900;line-height:1}
 .grade-label{font-size:15px;font-weight:900;margin-top:7px;letter-spacing:.5px}
 .grade-desc{font-size:11px;opacity:.65;margin-top:4px;line-height:1.4}
+
+/* ── 등급 박스 투명 오버레이 버튼 ── */
+.gbox-btn-wrap{
+  margin-top:-195px!important;   /* 박스 위로 올려서 겹침 */
+  position:relative;
+  z-index:20;
+  height:195px;
+}
+.gbox-btn-wrap .stButton>button{
+  height:195px!important;
+  background:transparent!important;
+  border:none!important;
+  color:transparent!important;
+  box-shadow:none!important;
+  cursor:pointer!important;
+  font-size:0!important;
+  padding:0!important;
+  border-radius:18px!important;
+}
+.gbox-btn-wrap .stButton>button:hover{
+  background:rgba(255,255,255,.04)!important;
+}
+.gbox-btn-wrap .stButton>button:active{
+  background:rgba(255,255,255,.09)!important;
+}
 
 /* ── 비디오 카드 ── */
 .video-card{
@@ -702,27 +723,54 @@ def render_card(row):
 # S→A→B→C 순서로 빛이 흘러가는 딜레이 (사이클 2.8s, 간격 0.7s)
 _SNAKE_CYCLE  = "2.8s"
 _SNAKE_DELAYS = {"S": "0s", "A": "0.7s", "B": "1.4s", "C": "2.1s"}
+_GRADE_LABEL  = {"S":"🏆 S급","A":"⭐ A급","B":"🌱 B급","C":"📺 C급"}
 
 def render_grade_summary(rows):
-    counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
-    boxes = ""
-    for g, cfg in GRADES.items():
-        icon_img = e3d(cfg["icon"], size=44)
-        delay    = _SNAKE_DELAYS[g]
-        # snake-pulse: 밝기/크기 파동  /  snake-shine: ::before 빛줄기
-        anim = (f"snake-pulse {_SNAKE_CYCLE} ease-in-out {delay} infinite")
-        boxes += (
-            f'<div class="grade-box" style="'
-            f'border-color:{cfg["border"]};background:{cfg["bg"]};'
-            f'animation:{anim};">'
-            f'<div style="line-height:1;margin-bottom:8px;'
-            f'filter:drop-shadow(0 0 8px {cfg["color"]}88);">{icon_img}</div>'
-            f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
-            f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
-            f'<div class="grade-desc">{cfg["desc"]}</div>'
-            f'</div>'
-        )
-    st.markdown(f'<div class="grade-summary">{boxes}</div>', unsafe_allow_html=True)
+    counts  = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
+    cur     = st.session_state.get("gf", "전체")   # 현재 선택된 필터
+
+    # 4열 그리드로 배치
+    cols = st.columns(4, gap="small")
+    for col, (g, cfg) in zip(cols, GRADES.items()):
+        with col:
+            is_sel   = (cur == _GRADE_LABEL[g])
+            icon_img = e3d(cfg["icon"], size=44)
+            delay    = _SNAKE_DELAYS[g]
+            anim     = f"snake-pulse {_SNAKE_CYCLE} ease-in-out {delay} infinite"
+            sel_ring = (f"outline:3px solid {cfg['color']};"
+                        f"outline-offset:3px;"
+                        f"box-shadow:0 0 24px {cfg['color']}66;" if is_sel else "")
+
+            # ── 시각적 박스 (HTML) ──
+            st.markdown(
+                f'<div class="grade-box" style="'
+                f'border-color:{cfg["border"]};background:{cfg["bg"]};'
+                f'animation:{anim};{sel_ring}cursor:pointer;">'
+                f'<div style="line-height:1;margin-bottom:8px;'
+                f'filter:drop-shadow(0 0 8px {cfg["color"]}88);">{icon_img}</div>'
+                f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
+                f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
+                f'<div class="grade-desc">{cfg["desc"]}</div>'
+                f'{"<div style=\'font-size:11px;margin-top:6px;color:"+cfg["color"]+";font-weight:900;\'>✓ 선택됨</div>" if is_sel else ""}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            # ── 투명 오버레이 버튼 (클릭 감지) ──
+            # CSS 로 박스 위로 끌어 올려 겹치게 함
+            st.markdown(
+                f'<div class="gbox-btn-wrap" data-g="{g}">',
+                unsafe_allow_html=True,
+            )
+            clicked = st.button("　", key=f"gb_{g}",
+                                use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            if clicked:
+                # 이미 선택된 등급 클릭 → 전체로 해제
+                st.session_state.gf = ("전체" if is_sel
+                                       else _GRADE_LABEL[g])
+                st.rerun()
 
 
 # ── 페이지: 로그인 ─────────────────────────────────────────────────────────────
