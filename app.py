@@ -185,6 +185,11 @@ div[data-baseweb="select"]>div{
   50%      { box-shadow:0 0 12px #e53935,0 0 24px rgba(229,57,53,.6); }
 }
 
+@keyframes nav-active-glow {
+  0%,100% { box-shadow:inset 0 0 20px rgba(229,57,53,.04); }
+  50%      { box-shadow:inset 0 0 30px rgba(229,57,53,.12); }
+}
+
 /* ── 기본 버튼 ── */
 .stButton>button{
   border-radius:9px!important;font-weight:700!important;
@@ -336,19 +341,22 @@ section[data-testid="stSidebar"] .stButton>button{
   background:transparent!important;
   border:none!important;
   text-align:left!important;
-  padding:10px 16px!important;
-  font-size:14px!important;
-  font-weight:600!important;
-  color:#999!important;
-  border-radius:10px!important;
+  padding:12px 16px!important;
+  font-size:16px!important;
+  font-weight:700!important;
+  color:#bbb!important;
+  border-radius:12px!important;
   width:100%!important;
-  transition:all .15s!important;
+  transition:all .18s!important;
   letter-spacing:.2px;
+  line-height:1.4!important;
 }
 section[data-testid="stSidebar"] .stButton>button:hover{
-  background:#1c1c1c!important;
+  background:#1e1e1e!important;
   color:#fff!important;
-  transform:translateX(3px)!important;
+  transform:translateX(4px)!important;
+  border-left:3px solid rgba(229,57,53,.5)!important;
+  padding-left:13px!important;
 }
 
 /* ── 상단 바 ── */
@@ -729,65 +737,66 @@ def render_sidebar(username: str):
 
         def nav(label: str, pg: str, icon: str):
             is_act = page == pg
-            icon_img = e3d(icon, size=20)
+            icon_img = e3d(icon, size=28)   # 3D 아이콘 크게
+
             if is_act:
-                # 활성 상태: 클릭 불필요, HTML만 표시
+                # 활성: HTML 블록 (빨간 배경 + 글로우)
                 st.markdown(
-                    f"<div style='background:linear-gradient(90deg,rgba(229,57,53,.22),rgba(229,57,53,.04));"
-                    f"border-left:4px solid #e53935;border-radius:0 12px 12px 0;"
-                    f"padding:11px 14px;margin:2px 4px 2px 0;"
-                    f"display:flex;align-items:center;gap:10px;"
-                    f"font-size:14px;font-weight:800;color:#fff;cursor:default;'>"
-                    f"{icon_img}"
-                    f"<span>{label}</span>"
-                    f"<span style='margin-left:auto;width:8px;height:8px;border-radius:50%;"
+                    f"<div style='"
+                    f"background:linear-gradient(90deg,rgba(229,57,53,.25),rgba(229,57,53,.05));"
+                    f"border-left:4px solid #e53935;border-radius:0 14px 14px 0;"
+                    f"padding:13px 16px;margin:3px 4px 3px 0;"
+                    f"display:flex;align-items:center;gap:12px;"
+                    f"animation:nav-active-glow 2s ease-in-out infinite;'>"
+                    f"<div style='flex-shrink:0;filter:drop-shadow(0 0 6px rgba(229,57,53,.7));'>"
+                    f"{icon_img}</div>"
+                    f"<span style='font-size:17px;font-weight:900;color:#fff;letter-spacing:.3px;'>"
+                    f"{label}</span>"
+                    f"<span style='margin-left:auto;width:9px;height:9px;border-radius:50%;"
                     f"background:#e53935;flex-shrink:0;"
-                    f"animation:nav-dot-pulse 1.5s ease-in-out infinite;'></span>"
+                    f"animation:nav-dot-pulse 1.4s ease-in-out infinite;"
+                    f"box-shadow:0 0 10px #e53935;'></span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
             else:
-                # 비활성 상태: 버튼으로 클릭 가능
-                st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:10px;padding:2px 4px 2px 0;'>",
-                    unsafe_allow_html=True,
-                )
-                cols = st.columns([1, 6])
-                with cols[0]:
+                # 비활성: 3D 아이콘 + 큰 버튼 텍스트
+                c_icon, c_btn = st.columns([1, 5])
+                with c_icon:
                     st.markdown(
-                        f"<div style='padding:7px 0 2px 6px;line-height:1;'>{icon_img}</div>",
+                        f"<div style='display:flex;align-items:center;justify-content:center;"
+                        f"height:100%;padding:6px 0 4px;'>"
+                        f"<div style='filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));'>"
+                        f"{icon_img}</div></div>",
                         unsafe_allow_html=True,
                     )
-                with cols[1]:
+                with c_btn:
                     if st.button(label, key=f"nav_{pg}", use_container_width=True):
                         st.session_state.page = pg
                         st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
+
+        def section_header(text: str, color: str):
+            st.markdown(
+                f"<div style='font-size:11px;font-weight:900;color:{color};"
+                f"text-transform:uppercase;letter-spacing:2px;"
+                f"padding:18px 16px 6px;opacity:.9;"
+                f"border-top:1px solid rgba(255,255,255,.04);margin-top:4px;'>"
+                f"{text}</div>",
+                unsafe_allow_html=True,
+            )
 
         # ── 채널 발굴 ──
-        st.markdown(
-            "<div style='font-size:10px;font-weight:800;color:#e53935;opacity:.8;"
-            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>채널 발굴</div>",
-            unsafe_allow_html=True,
-        )
+        section_header("🔥 채널 발굴", "#e53935")
         nav("빠른 검색",      "search",    "🔎")
         nav("나만의 키워드",  "custom_kw", "📝")
         nav("키워드 DB 검색", "db_search", "🗂")
 
         # ── 기록 ──
-        st.markdown(
-            "<div style='font-size:10px;font-weight:800;color:#00CFFF;opacity:.7;"
-            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>기록 & 관리</div>",
-            unsafe_allow_html=True,
-        )
+        section_header("📁 기록 & 관리", "#00CFFF")
         nav("저장된 검색 기록", "history", "📚")
 
         # ── 설정 ──
-        st.markdown(
-            "<div style='font-size:10px;font-weight:800;color:#4CAF50;opacity:.7;"
-            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>계정 & 설정</div>",
-            unsafe_allow_html=True,
-        )
+        section_header("⚙️ 계정 & 설정", "#4CAF50")
         nav("마이페이지",  "mypage",  "👤")
         nav("API 키 관리", "apikeys", "🔑")
 
