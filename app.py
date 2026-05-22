@@ -828,13 +828,12 @@ def render_sidebar(username: str):
         search_3d = e3d("🔍", size=26)
         # ── 로고 ──
         st.markdown(
-            "<div style='padding:22px 16px 14px;'>"
-            f"<div style='font-size:28px;font-weight:900;color:#f0f0f0;letter-spacing:-.5px;"
-            f"display:flex;align-items:center;gap:10px;line-height:1.2;'>"
-            f"{search_3d}"
-            f"채널 <span style='color:#e53935;animation:logo-glow 2s ease-in-out infinite;"
-            f"text-shadow:0 0 14px rgba(229,57,53,.7);'>발굴기</span></div>"
-            "<div style='font-size:12px;color:#555;margin-top:6px;letter-spacing:2px;"
+            "<div style='padding:24px 16px 14px;'>"
+            f"<div style='font-size:42px;font-weight:900;color:#f0f0f0;letter-spacing:-.8px;"
+            f"display:flex;align-items:center;gap:12px;line-height:1.1;'>"
+            f"{e3d('🔍', size=36)}"
+            f"채널 <span style='color:#e53935;'>발굴기</span></div>"
+            "<div style='font-size:13px;color:#555;margin-top:7px;letter-spacing:2px;"
             "font-weight:800;text-transform:uppercase;'>YOUTUBE CHANNEL FINDER</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -1236,6 +1235,16 @@ def page_search(mode: str):
         rows.sort(key=lambda r: (go[r["등급"]], r["업로드경과일"]))
         st.session_state.results = rows
 
+        # ── 자동 저장 ──────────────────────────────────────────────────────────
+        from datetime import datetime as _dt
+        _kw_label = (keywords_to_search[0] if len(keywords_to_search)==1
+                     else f"{keywords_to_search[0]} 외 {len(keywords_to_search)-1}개")
+        _auto_name = f"[자동] {_dt.now().strftime('%m/%d %H:%M')} · {_kw_label}"
+        _sid = save_session(_auto_name, rows)
+        st.session_state["auto_saved_sid"]  = _sid
+        st.session_state["auto_saved_name"] = _auto_name
+        # ───────────────────────────────────────────────────────────────────────
+
         kw_stat: dict[str,int] = {}
         for r in rows:
             k = r.get("_search_kw","기타")
@@ -1278,22 +1287,40 @@ def page_search(mode: str):
         st.markdown(f"<div style='display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;'>{badges}</div>",
                     unsafe_allow_html=True)
 
-    # 저장 행
-    sv1, sv2 = st.columns([3, 7])
+    # ── 자동 저장 상태 표시 + 이름 변경 ──
+    auto_sid  = st.session_state.get("auto_saved_sid", "")
+    auto_name = st.session_state.get("auto_saved_name", "")
+    sv1, sv2 = st.columns([4, 6])
     with sv1:
-        sname = st.text_input("저장 이름", placeholder="예: 영어 가족여행",
-                              label_visibility="collapsed", key="sv_name")
-        if st.button("💾 결과 저장", type="primary", use_container_width=True):
-            if not sname.strip(): st.warning("저장 이름을 입력해 주세요.")
-            else:
-                sid = save_session(sname.strip(), rows)
-                st.success(f"✅ '{sname}' 저장 완료! — 📚 기록 탭 확인")
+        if auto_sid:
+            st.markdown(
+                f"<div style='background:#0d1f0d;border:1px solid #2a5c2a;border-radius:10px;"
+                f"padding:9px 14px;font-size:13px;color:#4CAF50;font-weight:700;'>"
+                f"✅ 자동 저장됨 — <span style='color:#aaa;font-weight:400;font-size:11px;'>"
+                f"{auto_name}</span></div>",
+                unsafe_allow_html=True)
+            # 이름 변경 옵션
+            with st.expander("✏️ 이름 변경", expanded=False):
+                new_name = st.text_input("새 이름", value=auto_name,
+                                         label_visibility="collapsed", key="sv_rename")
+                if st.button("변경 저장", use_container_width=True, key="sv_rename_btn"):
+                    if new_name.strip():
+                        from db import rename_session
+                        rename_session(auto_sid, new_name.strip())
+                        st.session_state["auto_saved_name"] = new_name.strip()
+                        st.success("이름이 변경되었습니다.")
+                        st.rerun()
+        else:
+            st.markdown(
+                "<div style='background:#161616;border:1px solid #222;border-radius:10px;"
+                "padding:9px 14px;font-size:13px;color:#555;'>검색 후 자동 저장됩니다</div>",
+                unsafe_allow_html=True)
     with sv2:
         st.markdown(
             f"<div style='background:#161616;border:1px solid #222;border-radius:10px;"
-            f"padding:8px 14px;font-size:13px;color:#888;'>"
+            f"padding:9px 14px;font-size:13px;color:#888;'>"
             f"총 <b style='color:#f0f0f0'>{len(rows)}</b>개 영상 | 등급순 정렬 | "
-            f"이름 입력 후 💾 저장하면 📚 기록 탭에서 언제든 다시 확인</div>",
+            f"📚 기록 탭에서 언제든 다시 확인 · 이름 변경 · 삭제 가능</div>",
             unsafe_allow_html=True)
 
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
@@ -1331,7 +1358,7 @@ def page_history():
             "<div style='text-align:center;padding:70px 0;'>"
             "<div style='font-size:52px'>📭</div>"
             "<div style='font-size:16px;color:#555;margin-top:12px;'>"
-            "저장된 기록이 없습니다.<br>검색 후 💾 결과 저장 버튼을 눌러보세요.</div>"
+            "저장된 기록이 없습니다.<br>검색을 하면 자동으로 저장됩니다.</div>"
             "</div>", unsafe_allow_html=True)
         return
 
