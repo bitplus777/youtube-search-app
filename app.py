@@ -198,15 +198,17 @@ div[data-baseweb="select"]>div{
 .stButton>button[kind="primary"]{
   background: linear-gradient(
     90deg,
-    #b71c1c 0%,
-    #e53935 25%,
-    #ff7043 44%,
-    #ffe082 50%,
-    #ff7043 56%,
-    #e53935 75%,
-    #b71c1c 100%
+    #7f0000 0%,
+    #c62828 20%,
+    #e53935 38%,
+    #ff5252 48%,
+    #ff8a80 50%,
+    #ff5252 52%,
+    #e53935 62%,
+    #c62828 80%,
+    #7f0000 100%
   )!important;
-  background-size:260% 100%!important;
+  background-size:280% 100%!important;
   color:#fff!important;border:none!important;
   font-size:15px!important;font-weight:900!important;letter-spacing:.5px!important;
   animation:fire-sweep 2.2s ease-in-out infinite,
