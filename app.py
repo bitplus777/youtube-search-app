@@ -148,23 +148,60 @@ div[data-baseweb="select"]>div{
   background:rgba(229,57,53,.07)!important;
 }
 
+/* ── 회전 그라데이션 빛 keyframes ── */
+@keyframes btn-aurora {
+  0%   { box-shadow:6px 0 25px #e53935, 0 6px 25px #FF6B00,  -6px 0 25px #e53935,  0 -6px 25px #FF1744,  0 0 50px rgba(229,57,53,.25); background-position:0% 50%; }
+  25%  { box-shadow:0 6px 25px #FF6B00, -6px 0 25px #FFD700,  0 -6px 25px #FF6B00,  6px 0 25px #e53935,  0 0 50px rgba(255,107,0,.25);  background-position:50% 0%; }
+  50%  { box-shadow:-6px 0 25px #FF1744, 0 -6px 25px #e53935, 6px 0 25px #FF4081, 0 6px 25px #FF6B00,    0 0 50px rgba(255,23,68,.25);  background-position:100% 50%;}
+  75%  { box-shadow:0 -6px 25px #e53935, 6px 0 25px #FF4081,  0 6px 25px #e53935,  -6px 0 25px #FFD700,  0 0 50px rgba(229,57,53,.25); background-position:50% 100%;}
+  100% { box-shadow:6px 0 25px #e53935, 0 6px 25px #FF6B00,  -6px 0 25px #e53935,  0 -6px 25px #FF1744,  0 0 50px rgba(229,57,53,.25); background-position:0% 50%; }
+}
+
+@keyframes shimmer-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes gold-pulse {
+  0%,100% { box-shadow:0 0 12px rgba(255,215,0,.35),0 0 0 1px rgba(255,215,0,.15); }
+  50%      { box-shadow:0 0 35px rgba(255,215,0,.85),0 0 70px rgba(255,165,0,.35),inset 0 0 20px rgba(255,215,0,.06); }
+}
+@keyframes cyan-pulse {
+  0%,100% { box-shadow:0 0 12px rgba(0,207,255,.25); }
+  50%      { box-shadow:0 0 30px rgba(0,207,255,.7),0 0 60px rgba(0,144,204,.3); }
+}
+@keyframes green-pulse {
+  0%,100% { box-shadow:0 0 10px rgba(76,175,80,.2); }
+  50%      { box-shadow:0 0 26px rgba(76,175,80,.6),0 0 50px rgba(46,125,50,.25); }
+}
+
+@keyframes logo-glow {
+  0%,100% { text-shadow:0 0 10px rgba(229,57,53,.5); }
+  50%      { text-shadow:0 0 25px rgba(229,57,53,.9),0 0 50px rgba(255,107,0,.4); }
+}
+
+@keyframes nav-dot-pulse {
+  0%,100% { box-shadow:0 0 4px #e53935; }
+  50%      { box-shadow:0 0 12px #e53935,0 0 24px rgba(229,57,53,.6); }
+}
+
 /* ── 기본 버튼 ── */
 .stButton>button{
   border-radius:9px!important;font-weight:700!important;
   font-size:13px!important;transition:all .18s!important;
   border:1px solid #2a2a2a!important;
+  position:relative!important;
 }
 .stButton>button[kind="primary"]{
-  background:linear-gradient(135deg,#e53935 0%,#c62828 50%,#b71c1c 100%)!important;
+  background:linear-gradient(270deg,#e53935,#c62828,#FF6B00,#e53935)!important;
+  background-size:300% 300%!important;
   color:#fff!important;border:none!important;
-  box-shadow:0 4px 18px rgba(229,57,53,.5),0 0 0 1px rgba(229,57,53,.2)!important;
-  font-size:14px!important;
-  letter-spacing:.3px!important;
+  font-size:14px!important;letter-spacing:.3px!important;
+  animation:btn-aurora 3s ease infinite!important;
 }
 .stButton>button[kind="primary"]:hover{
   transform:translateY(-2px)!important;
-  box-shadow:0 8px 28px rgba(229,57,53,.7),0 0 0 2px rgba(229,57,53,.3)!important;
-  background:linear-gradient(135deg,#f44336 0%,#e53935 100%)!important;
+  filter:brightness(1.15)!important;
 }
 .stButton>button[kind="primary"]:active{
   transform:translateY(0px)!important;
@@ -596,14 +633,20 @@ def render_card(row):
 </div>""", unsafe_allow_html=True)
 
 
+GRADE_ANIM = {"S":"gold-pulse 2s ease-in-out infinite",
+              "A":"cyan-pulse 2.5s ease-in-out infinite",
+              "B":"green-pulse 3s ease-in-out infinite",
+              "C":"none"}
+
 def render_grade_summary(rows):
     counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
     boxes = ""
     for g, cfg in GRADES.items():
-        icon_img = e3d(cfg["icon"], size=36)
+        icon_img = e3d(cfg["icon"], size=40)
+        anim = GRADE_ANIM[g]
         boxes += (f'<div class="grade-box" style="border-color:{cfg["border"]};'
-                  f'background:{cfg["bg"]};box-shadow:{cfg["glow"]};">'
-                  f'<div style="font-size:36px;line-height:1;margin-bottom:4px;">{icon_img}</div>'
+                  f'background:{cfg["bg"]};animation:{anim};">'
+                  f'<div style="line-height:1;margin-bottom:6px;">{icon_img}</div>'
                   f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
                   f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
                   f'<div class="grade-desc">{cfg["desc"]}</div></div>')
@@ -662,19 +705,23 @@ def page_login():
 # ── 사이드바 내비 ──────────────────────────────────────────────────────────────
 def render_sidebar(username: str):
     with st.sidebar:
+        search_3d = e3d("🔍", size=26)
         # ── 로고 ──
         st.markdown(
             "<div style='padding:20px 16px 12px;'>"
-            "<div style='font-size:22px;font-weight:900;color:#f0f0f0;letter-spacing:-.3px;'>"
-            "🔍 채널 <span style='color:#e53935;'>발굴기</span></div>"
-            "<div style='font-size:11px;color:#444;margin-top:3px;letter-spacing:.5px;'>"
-            "YOUTUBE CHANNEL FINDER</div>"
+            f"<div style='font-size:22px;font-weight:900;color:#f0f0f0;letter-spacing:-.3px;"
+            f"display:flex;align-items:center;gap:8px;'>"
+            f"{search_3d}"
+            f"채널 <span style='color:#e53935;animation:logo-glow 2s ease-in-out infinite;'>"
+            f"발굴기</span></div>"
+            "<div style='font-size:10px;color:#444;margin-top:4px;letter-spacing:1.5px;"
+            "font-weight:700;'>YOUTUBE CHANNEL FINDER</div>"
             "</div>",
             unsafe_allow_html=True,
         )
         st.markdown(
             "<div style='height:1px;background:linear-gradient(90deg,#e53935,#333,transparent);"
-            "margin:0 0 8px;'></div>",
+            "margin:0 0 8px;box-shadow:0 0 8px rgba(229,57,53,.4);'></div>",
             unsafe_allow_html=True,
         )
 
@@ -682,34 +729,40 @@ def render_sidebar(username: str):
 
         def nav(label: str, pg: str, icon: str):
             is_act = page == pg
-            icon_img = e3d(icon, size=22)
+            icon_img = e3d(icon, size=20)
             if is_act:
+                # 활성 상태: 클릭 불필요, HTML만 표시
                 st.markdown(
-                    f"<div style='background:linear-gradient(90deg,rgba(229,57,53,.2),rgba(229,57,53,.04));"
+                    f"<div style='background:linear-gradient(90deg,rgba(229,57,53,.22),rgba(229,57,53,.04));"
                     f"border-left:4px solid #e53935;border-radius:0 12px 12px 0;"
-                    f"padding:11px 16px;margin:2px 6px 2px 0;"
-                    f"display:flex;align-items:center;gap:11px;"
-                    f"font-size:14px;font-weight:800;color:#fff;'>"
+                    f"padding:11px 14px;margin:2px 4px 2px 0;"
+                    f"display:flex;align-items:center;gap:10px;"
+                    f"font-size:14px;font-weight:800;color:#fff;cursor:default;'>"
                     f"{icon_img}"
                     f"<span>{label}</span>"
-                    f"<span style='margin-left:auto;width:7px;height:7px;border-radius:50%;"
-                    f"background:#e53935;display:inline-block;box-shadow:0 0 8px #e53935'></span>"
+                    f"<span style='margin-left:auto;width:8px;height:8px;border-radius:50%;"
+                    f"background:#e53935;flex-shrink:0;"
+                    f"animation:nav-dot-pulse 1.5s ease-in-out infinite;'></span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                st.button("", key=f"nav_{pg}_act", use_container_width=True,
-                          label_visibility="collapsed", disabled=True)
             else:
-                ic1, ic2 = st.columns([1, 7])
-                with ic1:
+                # 비활성 상태: 버튼으로 클릭 가능
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:10px;padding:2px 4px 2px 0;'>",
+                    unsafe_allow_html=True,
+                )
+                cols = st.columns([1, 6])
+                with cols[0]:
                     st.markdown(
-                        f"<div style='padding:8px 0 4px 8px;'>{icon_img}</div>",
+                        f"<div style='padding:7px 0 2px 6px;line-height:1;'>{icon_img}</div>",
                         unsafe_allow_html=True,
                     )
-                with ic2:
+                with cols[1]:
                     if st.button(label, key=f"nav_{pg}", use_container_width=True):
                         st.session_state.page = pg
                         st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 채널 발굴 ──
         st.markdown(
