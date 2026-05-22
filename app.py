@@ -30,27 +30,60 @@ DAILY_QUOTA = 10_000
 GRADES = {
     "S": {"label":"S급","icon":"🏆","color":"#FFD700","bg":"#1a1200","border":"#FFD700",
           "desc":"구독자 1만↓ · 7일↓ · 조회수 1만↓","badge":"background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;",
-          "glow":"0 0 18px rgba(255,215,0,0.35)"},
+          "glow":"0 0 18px rgba(255,215,0,0.35)","badge_text_color":"#000"},
     "A": {"label":"A급","icon":"⭐","color":"#00CFFF","bg":"#001520","border":"#00CFFF",
           "desc":"구독자 5만↓ · 30일↓ · 조회수 5만↓","badge":"background:linear-gradient(135deg,#00CFFF,#0090CC);color:#000;",
-          "glow":"0 0 18px rgba(0,207,255,0.25)"},
+          "glow":"0 0 18px rgba(0,207,255,0.25)","badge_text_color":"#000"},
     "B": {"label":"B급","icon":"🌱","color":"#4CAF50","bg":"#071507","border":"#4CAF50",
           "desc":"구독자 20만↓ · 90일↓","badge":"background:linear-gradient(135deg,#4CAF50,#2E7D32);color:#fff;",
-          "glow":"0 0 18px rgba(76,175,80,0.2)"},
+          "glow":"0 0 18px rgba(76,175,80,0.2)","badge_text_color":"#fff"},
     "C": {"label":"C급","icon":"📺","color":"#9E9E9E","bg":"#141414","border":"#444",
           "desc":"대형 채널 또는 오래된 영상","badge":"background:linear-gradient(135deg,#555,#333);color:#ccc;",
-          "glow":"none"},
+          "glow":"none","badge_text_color":"#ccc"},
 }
 
 DURATION_FILTERS = {"전체":None,"짧은 영상 (4분 미만)":"short","중간 영상 (4~20분)":"medium","긴 영상 (20분 초과)":"long"}
 SORT_OPTIONS     = {"관련성":"relevance","최신순":"date","조회수":"viewCount"}
 
-NAV_ITEMS = [
-    ("search",  "채널 발굴"),
-    ("history", "검색 기록"),
-    ("mypage",  "마이페이지"),
-    ("apikeys", "API 키 관리"),
-]
+# ── Microsoft Fluent Emoji 3D ──────────────────────────────────────────────────
+_FE = "https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@main/assets"
+EMOJI_3D = {
+    "🔍": f"{_FE}/Magnifying%20glass%20tilted%20right/3D/magnifying_glass_tilted_right_3d.png",
+    "📝": f"{_FE}/Memo/3D/memo_3d.png",
+    "🗂": f"{_FE}/Card%20index%20dividers/3D/card_index_dividers_3d.png",
+    "📚": f"{_FE}/Books/3D/books_3d.png",
+    "👤": f"{_FE}/Bust%20in%20silhouette/3D/bust_in_silhouette_3d.png",
+    "🔑": f"{_FE}/Key/3D/key_3d.png",
+    "🏆": f"{_FE}/Trophy/3D/trophy_3d.png",
+    "⭐": f"{_FE}/Star/3D/star_3d.png",
+    "🌱": f"{_FE}/Seedling/3D/seedling_3d.png",
+    "📺": f"{_FE}/Television/3D/television_3d.png",
+    "💾": f"{_FE}/Floppy%20disk/3D/floppy_disk_3d.png",
+    "🚀": f"{_FE}/Rocket/3D/rocket_3d.png",
+    "🎬": f"{_FE}/Clapper%20board/3D/clapper_board_3d.png",
+    "📊": f"{_FE}/Bar%20chart/3D/bar_chart_3d.png",
+    "📅": f"{_FE}/Calendar/3D/calendar_3d.png",
+    "👥": f"{_FE}/Busts%20in%20silhouette/3D/busts_in_silhouette_3d.png",
+    "👍": f"{_FE}/Thumbs%20up/3D/thumbs_up_3d.png",
+    "💬": f"{_FE}/Speech%20balloon/3D/speech_balloon_3d.png",
+    "📂": f"{_FE}/Open%20file%20folder/3D/open_file_folder_3d.png",
+    "🗑": f"{_FE}/Wastebasket/3D/wastebasket_3d.png",
+    "🔒": f"{_FE}/Locked/3D/locked_3d.png",
+    "✅": f"{_FE}/Check%20mark%20button/3D/check_mark_button_3d.png",
+    "⚡": f"{_FE}/High%20voltage/3D/high_voltage_3d.png",
+    "🎯": f"{_FE}/Direct%20hit/3D/direct_hit_3d.png",
+    "🩳": f"{_FE}/Shorts/3D/shorts_3d.png",
+}
+
+
+def e3d(emoji: str, size: int = 22, style: str = "") -> str:
+    """이모지 문자를 Microsoft Fluent Emoji 3D <img> 태그로 변환."""
+    url = EMOJI_3D.get(emoji)
+    if url:
+        return (f'<img src="{url}" width="{size}" height="{size}" '
+                f'style="vertical-align:middle;object-fit:contain;{style}" loading="lazy">')
+    return emoji
+
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 GLOBAL_CSS = """
@@ -122,13 +155,19 @@ div[data-baseweb="select"]>div{
   border:1px solid #2a2a2a!important;
 }
 .stButton>button[kind="primary"]{
-  background:linear-gradient(135deg,#e53935,#b71c1c)!important;
+  background:linear-gradient(135deg,#e53935 0%,#c62828 50%,#b71c1c 100%)!important;
   color:#fff!important;border:none!important;
-  box-shadow:0 4px 14px rgba(229,57,53,.35)!important;
+  box-shadow:0 4px 18px rgba(229,57,53,.5),0 0 0 1px rgba(229,57,53,.2)!important;
+  font-size:14px!important;
+  letter-spacing:.3px!important;
 }
 .stButton>button[kind="primary"]:hover{
-  transform:translateY(-1px);
-  box-shadow:0 6px 20px rgba(229,57,53,.5)!important;
+  transform:translateY(-2px)!important;
+  box-shadow:0 8px 28px rgba(229,57,53,.7),0 0 0 2px rgba(229,57,53,.3)!important;
+  background:linear-gradient(135deg,#f44336 0%,#e53935 100%)!important;
+}
+.stButton>button[kind="primary"]:active{
+  transform:translateY(0px)!important;
 }
 
 /* ── 스크롤바 ── */
@@ -250,32 +289,71 @@ div[data-baseweb="select"]>div{
 
 /* ── 네비 섹션 헤더 ── */
 .nav-section{
-  font-size:10px;font-weight:800;color:#444;
-  text-transform:uppercase;letter-spacing:1px;
-  padding:14px 14px 4px;margin:0;
+  font-size:10px;font-weight:800;color:#555;
+  text-transform:uppercase;letter-spacing:1.2px;
+  padding:16px 16px 5px;margin:0;
 }
-.nav-active button{
-  background:#1e1e1e!important;color:#fff!important;
-  border-left:3px solid #e53935!important;
-  padding-left:11px!important;
+
+/* ── 사이드바 nav 버튼 강화 ── */
+section[data-testid="stSidebar"] .stButton>button{
+  background:transparent!important;
+  border:none!important;
+  text-align:left!important;
+  padding:10px 16px!important;
+  font-size:14px!important;
+  font-weight:600!important;
+  color:#999!important;
+  border-radius:10px!important;
+  width:100%!important;
+  transition:all .15s!important;
+  letter-spacing:.2px;
+}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  background:#1c1c1c!important;
+  color:#fff!important;
+  transform:translateX(3px)!important;
 }
 
 /* ── 상단 바 ── */
 .topbar{
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 0 14px;border-bottom:1px solid #1e1e1e;margin-bottom:18px;
+  padding:12px 0 16px;border-bottom:1px solid #1e1e1e;margin-bottom:20px;
 }
-.topbar-title{font-size:20px;font-weight:900;color:#f0f0f0}
+.topbar-title{font-size:22px;font-weight:900;color:#f0f0f0}
 .topbar-title span{color:#e53935}
 .topbar-right{display:flex;align-items:center;gap:10px}
 .quota-chip{
   background:#1a1a1a;border:1px solid #2a2a2a;border-radius:20px;
-  padding:5px 14px;font-size:12px;font-weight:700;color:#aaa;
+  padding:6px 16px;font-size:12px;font-weight:700;color:#aaa;
 }
 .quota-chip b{color:#e53935}
 .user-chip{
   background:linear-gradient(135deg,#e53935,#b71c1c);
-  border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;color:#fff;
+  border-radius:20px;padding:6px 16px;font-size:13px;font-weight:800;
+  color:#fff;cursor:pointer;
+  box-shadow:0 3px 12px rgba(229,57,53,.4);
+  transition:all .2s;
+}
+.user-chip:hover{box-shadow:0 5px 18px rgba(229,57,53,.6);transform:translateY(-1px)}
+
+/* ── 팝오버 ── */
+div[data-testid="stPopover"] div[data-testid="stPopoverBody"]{
+  background:#1a1a1a!important;
+  border:1px solid #333!important;
+  border-radius:12px!important;
+}
+div[data-testid="stPopover"] div[data-testid="stPopoverBody"] .stButton>button{
+  background:transparent!important;
+  border:none!important;
+  text-align:left!important;
+  color:#ddd!important;
+  font-size:14px!important;
+  border-radius:8px!important;
+  width:100%!important;
+}
+div[data-testid="stPopover"] div[data-testid="stPopoverBody"] .stButton>button:hover{
+  background:#252525!important;
+  color:#fff!important;
 }
 </style>
 """
@@ -464,28 +542,52 @@ def render_card(row):
                'align-items:center;justify-content:center;font-size:36px;">🎬</div>')
     cb = "background:#FF0076;color:#fff;" if short else "background:#1a73e8;color:#fff;"
     cl = "🩳 숏폼" if short else "🎬 롱폼"
+    g_icon = e3d(g["icon"], size=16)
+    tv_icon = e3d("📺", size=14)
+    subs_icon = e3d("👥", size=15)
+    like_icon = e3d("👍", size=15)
+    chat_icon = e3d("💬", size=15)
+    cal_icon  = e3d("📅", size=13)
+    short_icon = e3d("🩳", size=14) if short else e3d("🎬", size=14)
+
     st.markdown(f"""
 <div class="video-card" style="border-color:{g['border']};background:{g['bg']};box-shadow:{g['glow']}">
   <div class="card-inner">
     <div class="thumb-wrap">
       {th}
-      <span class="grade-badge" style="{g['badge']}">{g['icon']} {g['label']}</span>
+      <span class="grade-badge" style="{g['badge']}">{g_icon} <b style='color:{g['badge_text_color']}'>{g['label']}</b></span>
       <span class="dur-badge" style="{cb};position:absolute;bottom:7px;left:7px;
-        font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;">{cl}</span>
+        font-size:11px;font-weight:700;padding:3px 8px;border-radius:5px;
+        display:flex;align-items:center;gap:4px;">{short_icon}{cl}</span>
       <span class="dur-badge">{row['재생시간']}</span>
     </div>
     <div class="card-info">
       <p class="v-title"><a href="{row['URL']}" target="_blank">{row['제목']}</a></p>
-      <div class="ch-row">📺 {row['채널명']}</div>
+      <div class="ch-row" style="display:flex;align-items:center;gap:5px;">{tv_icon} {row['채널명']}</div>
       <div class="stats-row">
-        <div class="stat-item"><span class="s-label">구독자</span><span class="s-val gold">👥 {fmt(row['구독자수'])}</span></div>
-        <div class="stat-item"><span class="s-label">조회수</span><span class="s-val red">▶ {fmt(row['조회수'])}</span></div>
-        <div class="stat-item"><span class="s-label">좋아요</span><span class="s-val">👍 {fmt(row['좋아요'])}</span></div>
-        <div class="stat-item"><span class="s-label">댓글</span><span class="s-val">💬 {fmt(row['댓글수'])}</span></div>
-        <div class="stat-item"><span class="s-label">업로드 후</span><span class="s-val">📅 {row['업로드경과일']}일</span></div>
+        <div class="stat-item">
+          <span class="s-label">구독자</span>
+          <span class="s-val gold" style="display:flex;align-items:center;gap:4px;">{subs_icon} {fmt(row['구독자수'])}</span>
+        </div>
+        <div class="stat-item">
+          <span class="s-label">조회수</span>
+          <span class="s-val red">▶ {fmt(row['조회수'])}</span>
+        </div>
+        <div class="stat-item">
+          <span class="s-label">좋아요</span>
+          <span class="s-val" style="display:flex;align-items:center;gap:4px;">{like_icon} {fmt(row['좋아요'])}</span>
+        </div>
+        <div class="stat-item">
+          <span class="s-label">댓글</span>
+          <span class="s-val" style="display:flex;align-items:center;gap:4px;">{chat_icon} {fmt(row['댓글수'])}</span>
+        </div>
+        <div class="stat-item">
+          <span class="s-label">업로드 후</span>
+          <span class="s-val" style="display:flex;align-items:center;gap:4px;">{cal_icon} {row['업로드경과일']}일</span>
+        </div>
       </div>
       <div class="tag-row">
-        <span class="tag">📅 {row['업로드일']}</span>
+        <span class="tag">{cal_icon} {row['업로드일']}</span>
         <span class="tag">⏱ {row['재생시간']}</span>
       </div>
       <a class="watch-btn" href="{row['URL']}" target="_blank">▶ 영상 보기</a>
@@ -498,9 +600,11 @@ def render_grade_summary(rows):
     counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
     boxes = ""
     for g, cfg in GRADES.items():
+        icon_img = e3d(cfg["icon"], size=36)
         boxes += (f'<div class="grade-box" style="border-color:{cfg["border"]};'
                   f'background:{cfg["bg"]};box-shadow:{cfg["glow"]};">'
-                  f'<div class="grade-count" style="color:{cfg["color"]}">{cfg["icon"]} {counts[g]}</div>'
+                  f'<div style="font-size:36px;line-height:1;margin-bottom:4px;">{icon_img}</div>'
+                  f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
                   f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
                   f'<div class="grade-desc">{cfg["desc"]}</div></div>')
     st.markdown(f'<div class="grade-summary">{boxes}</div>', unsafe_allow_html=True)
@@ -558,50 +662,88 @@ def page_login():
 # ── 사이드바 내비 ──────────────────────────────────────────────────────────────
 def render_sidebar(username: str):
     with st.sidebar:
-        # 로고
+        # ── 로고 ──
         st.markdown(
-            "<div style='padding:16px 14px 10px;'>"
-            "<div style='font-size:18px;font-weight:900;color:#f0f0f0;'>🔍 채널 <span style=color:#e53935>발굴기</span></div>"
-            "<div style='font-size:11px;color:#444;margin-top:2px;'>YouTube Channel Finder</div>"
+            "<div style='padding:20px 16px 12px;'>"
+            "<div style='font-size:22px;font-weight:900;color:#f0f0f0;letter-spacing:-.3px;'>"
+            "🔍 채널 <span style='color:#e53935;'>발굴기</span></div>"
+            "<div style='font-size:11px;color:#444;margin-top:3px;letter-spacing:.5px;'>"
+            "YOUTUBE CHANNEL FINDER</div>"
             "</div>",
             unsafe_allow_html=True,
         )
-        st.markdown("<hr style='border-color:#1e1e1e;margin:0 0 6px'>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='height:1px;background:linear-gradient(90deg,#e53935,#333,transparent);"
+            "margin:0 0 8px;'></div>",
+            unsafe_allow_html=True,
+        )
 
         page = st.session_state.get("page", "search")
 
         def nav(label: str, pg: str, icon: str):
             is_act = page == pg
-            style = ("background:#1e1e1e;color:#fff;border-left:3px solid #e53935;"
-                     if is_act else "")
-            btn_style = f"<style>div[data-testid='stButton'] button[key='nav_{pg}']{{" + style + "}</style>"
-            if st.button(
-                f"{'▶ ' if is_act else '   '}{icon} {label}",
-                key=f"nav_{pg}",
-                use_container_width=True,
-            ):
-                st.session_state.page = pg
-                st.rerun()
+            icon_img = e3d(icon, size=22)
+            if is_act:
+                st.markdown(
+                    f"<div style='background:linear-gradient(90deg,rgba(229,57,53,.2),rgba(229,57,53,.04));"
+                    f"border-left:4px solid #e53935;border-radius:0 12px 12px 0;"
+                    f"padding:11px 16px;margin:2px 6px 2px 0;"
+                    f"display:flex;align-items:center;gap:11px;"
+                    f"font-size:14px;font-weight:800;color:#fff;'>"
+                    f"{icon_img}"
+                    f"<span>{label}</span>"
+                    f"<span style='margin-left:auto;width:7px;height:7px;border-radius:50%;"
+                    f"background:#e53935;display:inline-block;box-shadow:0 0 8px #e53935'></span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.button("", key=f"nav_{pg}_act", use_container_width=True,
+                          label_visibility="collapsed", disabled=True)
+            else:
+                ic1, ic2 = st.columns([1, 7])
+                with ic1:
+                    st.markdown(
+                        f"<div style='padding:8px 0 4px 8px;'>{icon_img}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with ic2:
+                    if st.button(label, key=f"nav_{pg}", use_container_width=True):
+                        st.session_state.page = pg
+                        st.rerun()
 
-        st.markdown("<div class='nav-section'>채널 발굴</div>", unsafe_allow_html=True)
-        nav("빠른 검색",      "search",     "🔎")
-        nav("나만의 키워드",  "custom_kw",  "📝")
-        nav("키워드 DB 검색", "db_search",  "🗂")
+        # ── 채널 발굴 ──
+        st.markdown(
+            "<div style='font-size:10px;font-weight:800;color:#e53935;opacity:.8;"
+            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>채널 발굴</div>",
+            unsafe_allow_html=True,
+        )
+        nav("빠른 검색",      "search",    "🔎")
+        nav("나만의 키워드",  "custom_kw", "📝")
+        nav("키워드 DB 검색", "db_search", "🗂")
 
-        st.markdown("<div class='nav-section'>기록 & 관리</div>", unsafe_allow_html=True)
-        nav("저장된 검색 기록", "history",  "📚")
+        # ── 기록 ──
+        st.markdown(
+            "<div style='font-size:10px;font-weight:800;color:#00CFFF;opacity:.7;"
+            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>기록 & 관리</div>",
+            unsafe_allow_html=True,
+        )
+        nav("저장된 검색 기록", "history", "📚")
 
-        st.markdown("<div class='nav-section'>계정</div>", unsafe_allow_html=True)
-        nav("마이페이지",   "mypage",  "👤")
-        nav("API 키 관리",  "apikeys", "🔑")
+        # ── 설정 ──
+        st.markdown(
+            "<div style='font-size:10px;font-weight:800;color:#4CAF50;opacity:.7;"
+            "text-transform:uppercase;letter-spacing:1.5px;padding:14px 16px 4px;'>계정 & 설정</div>",
+            unsafe_allow_html=True,
+        )
+        nav("마이페이지",  "mypage",  "👤")
+        nav("API 키 관리", "apikeys", "🔑")
 
-        st.markdown("<hr style='border-color:#1e1e1e;margin:10px 0 6px'>", unsafe_allow_html=True)
-
-        # 로그아웃
-        if st.button("🚪 로그아웃", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.rerun()
+        # ── 하단 구분선 ──
+        st.markdown(
+            "<div style='height:1px;background:linear-gradient(90deg,transparent,#333,transparent);"
+            "margin:12px 0 8px;'></div>",
+            unsafe_allow_html=True,
+        )
 
         # 하단 쿼타 미니 표시
         q = get_today_quota()
@@ -609,14 +751,16 @@ def render_sidebar(username: str):
         pct = min(used / DAILY_QUOTA * 100, 100)
         bar_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
         st.markdown(
-            f"<div style='padding:10px 14px;'>"
-            f"<div style='font-size:10px;color:#444;font-weight:700;text-transform:uppercase;"
-            f"letter-spacing:.8px;margin-bottom:4px;'>오늘 쿼타</div>"
-            f"<div style='font-size:12px;color:#888;font-weight:700;'>"
-            f"<b style='color:{bar_color}'>{used:,}</b> / {DAILY_QUOTA:,}</div>"
-            f"<div style='background:#1a1a1a;border-radius:4px;height:5px;margin-top:5px'>"
-            f"<div style='width:{pct:.1f}%;height:5px;border-radius:4px;"
-            f"background:{bar_color};transition:width .4s'></div></div>"
+            f"<div style='padding:8px 16px 14px;'>"
+            f"<div style='font-size:10px;color:#444;font-weight:800;text-transform:uppercase;"
+            f"letter-spacing:1px;margin-bottom:5px;'>오늘 API 쿼타</div>"
+            f"<div style='display:flex;justify-content:space-between;font-size:12px;"
+            f"font-weight:700;margin-bottom:5px;'>"
+            f"<span style='color:{bar_color};'>{used:,}</span>"
+            f"<span style='color:#333;'>{DAILY_QUOTA:,}</span></div>"
+            f"<div style='background:#1a1a1a;border-radius:5px;height:6px;'>"
+            f"<div style='width:{pct:.1f}%;height:6px;border-radius:5px;"
+            f"background:linear-gradient(90deg,{bar_color},{'#ff6b6b' if bar_color=='#e53935' else bar_color});'></div></div>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -630,16 +774,62 @@ def render_topbar(title: str, username: str):
     pct = min(used / DAILY_QUOTA * 100, 100)
     chip_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
     initials = username[:2].upper() if username else "?"
-    st.markdown(
-        f"<div class='topbar'>"
-        f"<div class='topbar-title'>{title}</div>"
-        f"<div class='topbar-right'>"
-        f"<div class='quota-chip'>쿼타 <b style='color:{chip_color}'>{used:,}</b> / {DAILY_QUOTA:,} "
-        f"<span style='color:#4CAF50'>(잔여 {remaining:,})</span></div>"
-        f"<div class='user-chip'>👤 {username}</div>"
-        f"</div></div>",
-        unsafe_allow_html=True,
-    )
+    person_icon = e3d("👤", size=16)
+    key_icon    = e3d("🔑", size=15)
+    chart_icon  = e3d("📊", size=15)
+
+    tb_left, tb_right = st.columns([6, 4])
+    with tb_left:
+        st.markdown(
+            f"<div style='padding:10px 0 14px;border-bottom:1px solid #1e1e1e;'>"
+            f"<div style='font-size:21px;font-weight:900;color:#f0f0f0;'>{title}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with tb_right:
+        st.markdown("<div style='padding:6px 0 0;'>", unsafe_allow_html=True)
+        rc1, rc2 = st.columns([5, 3])
+        with rc1:
+            st.markdown(
+                f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:20px;"
+                f"padding:7px 14px;font-size:12px;font-weight:700;color:#aaa;"
+                f"display:flex;align-items:center;gap:6px;white-space:nowrap;'>"
+                f"{chart_icon} 쿼타 <b style='color:{chip_color}'>{used:,}</b>"
+                f"<span style='color:#4CAF50;'>(잔여 {remaining:,})</span></div>",
+                unsafe_allow_html=True,
+            )
+        with rc2:
+            with st.popover(
+                f"👤 {username}",
+                use_container_width=True,
+            ):
+                st.markdown(
+                    f"<div style='padding:4px 0 10px;'>"
+                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px;"
+                    f"padding-bottom:10px;border-bottom:1px solid #2a2a2a;'>"
+                    f"<div style='width:40px;height:40px;border-radius:50%;"
+                    f"background:linear-gradient(135deg,#e53935,#b71c1c);"
+                    f"display:flex;align-items:center;justify-content:center;"
+                    f"font-size:16px;font-weight:900;color:#fff;flex-shrink:0;'>{initials}</div>"
+                    f"<div><div style='font-size:14px;font-weight:800;color:#f0f0f0;'>{username}</div>"
+                    f"<div style='font-size:11px;color:#555;'>로그인됨</div></div></div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"{person_icon} 마이페이지", use_container_width=True,
+                             key="pop_mypage"):
+                    st.session_state.page = "mypage"; st.rerun()
+                if st.button(f"{key_icon} API 키 관리", use_container_width=True,
+                             key="pop_apikeys"):
+                    st.session_state.page = "apikeys"; st.rerun()
+                st.markdown("<hr style='border-color:#2a2a2a;margin:6px 0'>", unsafe_allow_html=True)
+                if st.button("🚪 로그아웃", use_container_width=True, key="pop_logout"):
+                    st.session_state.logged_in = False
+                    st.session_state.username = ""
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div style='border-bottom:1px solid #1e1e1e;margin-bottom:18px;'></div>",
+                unsafe_allow_html=True)
 
 
 # ── 페이지: 검색 (공통 결과 표시) ─────────────────────────────────────────────
