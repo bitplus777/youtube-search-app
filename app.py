@@ -148,18 +148,16 @@ div[data-baseweb="select"]>div{
   background:rgba(229,57,53,.07)!important;
 }
 
-/* ── 회전 그라데이션 빛 keyframes ── */
-@keyframes btn-aurora {
-  0%   { box-shadow:6px 0 25px #e53935, 0 6px 25px #FF6B00,  -6px 0 25px #e53935,  0 -6px 25px #FF1744,  0 0 50px rgba(229,57,53,.25); background-position:0% 50%; }
-  25%  { box-shadow:0 6px 25px #FF6B00, -6px 0 25px #FFD700,  0 -6px 25px #FF6B00,  6px 0 25px #e53935,  0 0 50px rgba(255,107,0,.25);  background-position:50% 0%; }
-  50%  { box-shadow:-6px 0 25px #FF1744, 0 -6px 25px #e53935, 6px 0 25px #FF4081, 0 6px 25px #FF6B00,    0 0 50px rgba(255,23,68,.25);  background-position:100% 50%;}
-  75%  { box-shadow:0 -6px 25px #e53935, 6px 0 25px #FF4081,  0 6px 25px #e53935,  -6px 0 25px #FFD700,  0 0 50px rgba(229,57,53,.25); background-position:50% 100%;}
-  100% { box-shadow:6px 0 25px #e53935, 0 6px 25px #FF6B00,  -6px 0 25px #e53935,  0 -6px 25px #FF1744,  0 0 50px rgba(229,57,53,.25); background-position:0% 50%; }
+/* ── 빛이 버튼 위를 좌→우로 흘러가는 keyframes ── */
+@keyframes fire-sweep {
+  0%   { background-position: -100% center; }
+  100% { background-position: 200% center; }
 }
 
-@keyframes shimmer-sweep {
-  0%   { background-position: -200% center; }
-  100% { background-position: 200% center; }
+/* 주변 글로우만 살살 깜박 */
+@keyframes red-glow-pulse {
+  0%,100% { box-shadow:0 0 14px rgba(229,57,53,.55), 0 4px 18px rgba(229,57,53,.25); }
+  50%      { box-shadow:0 0 28px rgba(229,57,53,.85), 0 4px 28px rgba(229,57,53,.45); }
 }
 
 @keyframes gold-pulse {
@@ -198,18 +196,28 @@ div[data-baseweb="select"]>div{
   position:relative!important;
 }
 .stButton>button[kind="primary"]{
-  background:linear-gradient(270deg,#e53935,#c62828,#FF6B00,#e53935)!important;
-  background-size:300% 300%!important;
+  background: linear-gradient(
+    90deg,
+    #b71c1c 0%,
+    #e53935 25%,
+    #ff7043 44%,
+    #ffe082 50%,
+    #ff7043 56%,
+    #e53935 75%,
+    #b71c1c 100%
+  )!important;
+  background-size:260% 100%!important;
   color:#fff!important;border:none!important;
-  font-size:14px!important;letter-spacing:.3px!important;
-  animation:btn-aurora 3s ease infinite!important;
+  font-size:15px!important;font-weight:900!important;letter-spacing:.5px!important;
+  animation:fire-sweep 2.2s ease-in-out infinite,
+            red-glow-pulse 2.2s ease-in-out infinite!important;
 }
 .stButton>button[kind="primary"]:hover{
-  transform:translateY(-2px)!important;
-  filter:brightness(1.15)!important;
+  transform:translateY(-2px) scale(1.01)!important;
+  filter:brightness(1.12)!important;
 }
 .stButton>button[kind="primary"]:active{
-  transform:translateY(0px)!important;
+  transform:translateY(1px) scale(.99)!important;
 }
 
 /* ── 스크롤바 ── */
@@ -976,18 +984,15 @@ def page_search(mode: str):
             keywords_to_search = [kw_input.strip()] if kw_input.strip() else []
 
         elif mode == "custom_kw":
-            st.markdown("<div style='padding:0 4px;'>", unsafe_allow_html=True)
-            c1, c2 = st.columns([5,2])
-            with c1:
-                new_kw = st.text_input("키워드", placeholder="vlog in korea",
+            with st.form("ck_form", clear_on_submit=True):
+                new_kw = st.text_input("키워드 입력", placeholder="vlog in korea",
                                        label_visibility="collapsed", key="ck_input")
-            with c2:
-                if st.button("➕ 추가", use_container_width=True, key="ck_add"):
-                    kw_c = new_kw.strip()
-                    if kw_c and kw_c not in st.session_state.my_keywords:
-                        st.session_state.my_keywords.append(kw_c)
-                    st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
+                submitted = st.form_submit_button("➕ 키워드 추가", use_container_width=True)
+            if submitted:
+                kw_c = new_kw.strip()
+                if kw_c and kw_c not in st.session_state.my_keywords:
+                    st.session_state.my_keywords.append(kw_c)
+                st.rerun()
 
             my_kws = st.session_state.my_keywords
             for i, kw_item in enumerate(my_kws):
