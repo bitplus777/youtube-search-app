@@ -1094,9 +1094,22 @@ def page_search(mode: str):
         st.markdown("<hr style='border-color:#1e1e1e;margin:4px 0 10px'>", unsafe_allow_html=True)
         st.markdown(
             "<div style='font-size:12px;font-weight:800;color:#666;"
-            "text-transform:uppercase;letter-spacing:.8px;padding:0 14px 6px;'>검색 설정</div>",
+            "text-transform:uppercase;letter-spacing:.8px;padding:0 14px 4px;'>검색 설정</div>",
             unsafe_allow_html=True,
         )
+
+        # ── 콘텐츠 유형 (최상단 고정) ──────────────────────────────────────────
+        st.markdown(
+            "<div style='font-size:11px;color:#555;font-weight:700;"
+            "padding:0 4px 3px;letter-spacing:.3px;'>영상 유형</div>",
+            unsafe_allow_html=True,
+        )
+        content_type = st.radio(
+            "콘텐츠", ["전체", "🎬 롱폼만", "🩳 숏폼만"],
+            horizontal=True, label_visibility="collapsed", key="ct_radio",
+        )
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        # ──────────────────────────────────────────────────────────────────────
 
         if mode == "search":
             kw_input = st.text_input("검색어", placeholder="korea hiking vlog", key="sq_kw")
@@ -1216,8 +1229,6 @@ def page_search(mode: str):
                                        disabled=(kw_count==0))
 
         st.markdown("<hr style='border-color:#1e1e1e;margin:8px 0'>", unsafe_allow_html=True)
-        content_type = st.radio("콘텐츠", ["전체","🎬 롱폼만","🩳 숏폼만"],
-                                horizontal=True, label_visibility="collapsed", key="ct_radio")
         min_v = st.number_input("최소 조회수", 0, value=0, step=1000, key="min_v")
         max_v = st.number_input("최대 조회수", 0, value=0, step=1000, key="max_v")
 
