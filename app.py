@@ -716,14 +716,14 @@ def render_sidebar(username: str):
         search_3d = e3d("🔍", size=26)
         # ── 로고 ──
         st.markdown(
-            "<div style='padding:20px 16px 12px;'>"
-            f"<div style='font-size:22px;font-weight:900;color:#f0f0f0;letter-spacing:-.3px;"
-            f"display:flex;align-items:center;gap:8px;'>"
+            "<div style='padding:22px 16px 14px;'>"
+            f"<div style='font-size:28px;font-weight:900;color:#f0f0f0;letter-spacing:-.5px;"
+            f"display:flex;align-items:center;gap:10px;line-height:1.2;'>"
             f"{search_3d}"
-            f"채널 <span style='color:#e53935;animation:logo-glow 2s ease-in-out infinite;'>"
-            f"발굴기</span></div>"
-            "<div style='font-size:10px;color:#444;margin-top:4px;letter-spacing:1.5px;"
-            "font-weight:700;'>YOUTUBE CHANNEL FINDER</div>"
+            f"채널 <span style='color:#e53935;animation:logo-glow 2s ease-in-out infinite;"
+            f"text-shadow:0 0 14px rgba(229,57,53,.7);'>발굴기</span></div>"
+            "<div style='font-size:12px;color:#555;margin-top:6px;letter-spacing:2px;"
+            "font-weight:800;text-transform:uppercase;'>YOUTUBE CHANNEL FINDER</div>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -777,10 +777,10 @@ def render_sidebar(username: str):
 
         def section_header(text: str, color: str):
             st.markdown(
-                f"<div style='font-size:11px;font-weight:900;color:{color};"
-                f"text-transform:uppercase;letter-spacing:2px;"
-                f"padding:18px 16px 6px;opacity:.9;"
-                f"border-top:1px solid rgba(255,255,255,.04);margin-top:4px;'>"
+                f"<div style='font-size:13px;font-weight:900;color:{color};"
+                f"letter-spacing:1.5px;padding:20px 16px 8px;"
+                f"opacity:1;border-top:1px solid rgba(255,255,255,.06);"
+                f"margin-top:6px;text-shadow:0 0 10px {color}55;'>"
                 f"{text}</div>",
                 unsafe_allow_html=True,
             )
@@ -814,10 +814,10 @@ def render_sidebar(username: str):
         bar_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
         st.markdown(
             f"<div style='padding:8px 16px 14px;'>"
-            f"<div style='font-size:10px;color:#444;font-weight:800;text-transform:uppercase;"
-            f"letter-spacing:1px;margin-bottom:5px;'>오늘 API 쿼타</div>"
-            f"<div style='display:flex;justify-content:space-between;font-size:12px;"
-            f"font-weight:700;margin-bottom:5px;'>"
+            f"<div style='font-size:13px;color:#888;font-weight:900;text-transform:uppercase;"
+            f"letter-spacing:1.5px;margin-bottom:7px;'>⚡ 오늘 API 쿼타</div>"
+            f"<div style='display:flex;justify-content:space-between;font-size:14px;"
+            f"font-weight:800;margin-bottom:6px;'>"
             f"<span style='color:{bar_color};'>{used:,}</span>"
             f"<span style='color:#333;'>{DAILY_QUOTA:,}</span></div>"
             f"<div style='background:#1a1a1a;border-radius:5px;height:6px;'>"
