@@ -177,6 +177,25 @@ def parse_duration(d: str) -> str:
     return f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
 
 
+def duration_seconds(d: str) -> int:
+    """ISO 8601 duration → 총 초(seconds)"""
+    if not d:
+        return 0
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d)
+    if not m:
+        return 0
+    h, mi, s = (int(g or 0) for g in m.groups())
+    return h * 3600 + mi * 60 + s
+
+
+def is_shorts(raw_duration: str, title: str) -> bool:
+    """숏폼 판별: 60초 이하이거나 제목에 #shorts/#short 포함"""
+    secs = duration_seconds(raw_duration)
+    title_lower = title.lower()
+    has_tag = "#shorts" in title_lower or "#short" in title_lower
+    return (0 < secs <= 60) or has_tag
+
+
 def days_since(published_at: str) -> int:
     try:
         dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
@@ -244,10 +263,13 @@ def fetch_subs(youtube, channel_ids: list[str]) -> dict[str, int]:
     result = {}
     for i in range(0, len(channel_ids), 50):
         chunk = channel_ids[i: i + 50]
-        resp = youtube.channels().list(part="statistics", id=",".join(chunk)).execute()
-        for item in resp.get("items", []):
-            s = item.get("statistics", {}).get("subscriberCount")
-            result[item["id"]] = int(s) if s else 0
+        try:
+            resp = youtube.channels().list(part="statistics", id=",".join(chunk)).execute()
+            for item in resp.get("items", []):
+                s = item.get("statistics", {}).get("subscriberCount")
+                result[item["id"]] = int(s) if s else 0
+        except Exception:
+            pass  # 구독자 수 실패 시 0으로 처리하고 계속 진행
     return result
 
 
@@ -277,20 +299,28 @@ def fetch_details(youtube, video_ids: list[str]) -> list[dict]:
         subs = subs_map.get(sn.get("channelId", ""), 0)
         views = int(st.get("viewCount", 0))
         d = days_since(pub)
+        raw_dur = cd.get("duration", "")
+        title = sn.get("title", "")
+        short = is_shorts(raw_dur, title)
+        # 숏폼은 Shorts URL 사용
+        url = (f"https://www.youtube.com/shorts/{vid}" if short
+               else f"https://www.youtube.com/watch?v={vid}")
         rows.append({
             "등급": calculate_grade(subs, views, d),
-            "제목": sn.get("title", ""),
+            "콘텐츠유형": "🩳 숏폼" if short else "🎬 롱폼",
+            "제목": title,
             "채널명": sn.get("channelTitle", ""),
             "구독자수": subs,
-            "URL": f"https://www.youtube.com/watch?v={vid}",
+            "URL": url,
             "업로드일": pub[:10],
             "업로드경과일": d,
             "조회수": views,
             "좋아요": int(st.get("likeCount", 0)),
             "댓글수": int(st.get("commentCount", 0)),
-            "재생시간": parse_duration(cd.get("duration", "")),
+            "재생시간": parse_duration(raw_dur),
             "썸네일": (sn.get("thumbnails", {}).get("high", {}).get("url", "")
                       or sn.get("thumbnails", {}).get("medium", {}).get("url", "")),
+            "_is_short": short,
             "_channel_id": sn.get("channelId", ""),
         })
     return rows
@@ -300,8 +330,17 @@ def fetch_details(youtube, video_ids: list[str]) -> list[dict]:
 def render_card(row: dict, t: dict):
     g = GRADES[row["등급"]]
     thumb = row["썸네일"]
-    thumb_html = (f'<img src="{thumb}" alt="썸네일">' if thumb
+    is_short = row.get("_is_short", False)
+
+    # 숏폼은 세로형 비율로 표시
+    thumb_style = ("width:100%;height:100%;object-fit:cover;display:block;"
+                   + ("aspect-ratio:9/16;" if is_short else ""))
+    thumb_html = (f'<img src="{thumb}" alt="썸네일" style="{thumb_style}">' if thumb
                   else f'<div style="background:#222;width:100%;height:155px;"></div>')
+
+    content_badge_style = ("background:#FF0076;color:#fff;" if is_short
+                           else "background:#1a73e8;color:#fff;")
+    content_label = "🩳 숏폼" if is_short else "🎬 롱폼"
 
     st.markdown(f"""
 <div class="video-card" style="border-color:{g['border']}">
@@ -309,6 +348,8 @@ def render_card(row: dict, t: dict):
     <div class="thumb-wrap">
       {thumb_html}
       <span class="grade-badge" style="{g['badge']}">{g['icon']} {g['label']}</span>
+      <span class="dur-badge" style="{content_badge_style};position:absolute;bottom:8px;left:8px;
+        font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">{content_label}</span>
       <span class="dur-badge">{row['재생시간']}</span>
     </div>
     <div class="card-info">
@@ -490,6 +531,16 @@ def main():
             keyword_input = ""
 
         st.divider()
+        st.markdown("### 🎬 콘텐츠 유형")
+        content_type = st.radio(
+            "콘텐츠 유형",
+            ["전체", "🎬 롱폼만", "🩳 숏폼만"],
+            horizontal=True,
+            label_visibility="collapsed",
+            help="숏폼: 60초 이하 또는 #Shorts 태그 포함 영상",
+        )
+
+        st.divider()
         st.markdown("### 📊 조회수 필터")
         min_views = st.number_input("최소 조회수", min_value=0, value=0, step=1000)
         max_views = st.number_input("최대 조회수", min_value=0, value=0, step=1000)
@@ -518,46 +569,64 @@ def main():
 
         all_ids: dict[str, str] = {}  # video_id → search_keyword
         total = len(keywords_to_search)
+        errors: list[str] = []
 
         progress_bar = st.progress(0, text="검색 준비 중...")
         status_box = st.empty()
 
-        try:
-            for idx, kw in enumerate(keywords_to_search):
-                status_box.markdown(
-                    f"🔍 **{idx+1}/{total}** 검색 중: `{kw}` "
-                    f"| 수집된 영상: **{len(all_ids)}개**"
-                )
-                try:
-                    ids = search_ids(youtube, kw, duration_filter, sort_by,
-                                     max_results, pub_after,
-                                     max_pages=pages_arg)
-                    for vid in ids:
-                        if vid not in all_ids:
-                            all_ids[vid] = kw
-                except HttpError as e:
-                    if "quotaExceeded" in str(e):
-                        st.warning("⚠️ API 할당량 초과. 지금까지 수집된 결과를 표시합니다.")
-                        break
-                    continue
+        for idx, kw in enumerate(keywords_to_search):
+            status_box.markdown(
+                f"🔍 **{idx+1}/{total}** 검색 중: `{kw}` "
+                f"| 수집된 영상: **{len(all_ids)}개**"
+            )
+            try:
+                ids = search_ids(youtube, kw, duration_filter, sort_by,
+                                 max_results, pub_after,
+                                 max_pages=pages_arg)
+                for vid in ids:
+                    if vid not in all_ids:
+                        all_ids[vid] = kw
+            except HttpError as e:
+                err_str = str(e)
+                if "quotaExceeded" in err_str:
+                    st.warning("⚠️ API 일일 할당량 초과. 지금까지 수집된 결과를 표시합니다.")
+                    break
+                errors.append(f"`{kw}`: {err_str[:120]}")
+                # 첫 오류 즉시 표시 (API 키 문제 등 조기 감지)
+                if idx == 0 and len(errors) == 1:
+                    st.error(f"첫 번째 검색 오류 — API 키를 확인하세요:\n\n{errors[0]}")
+                    st.stop()
+                continue
+            except Exception as e:
+                st.error(f"예상치 못한 오류: {e}")
+                st.stop()
 
-                progress_bar.progress((idx + 1) / total,
-                                      text=f"진행: {idx+1}/{total} 키워드 | 수집: {len(all_ids)}개")
-                if total > 1:
-                    time.sleep(0.1)
+            progress_bar.progress((idx + 1) / total,
+                                  text=f"진행: {idx+1}/{total} | 수집: {len(all_ids)}개")
+            if total > 1:
+                time.sleep(0.05)
 
-        except Exception as e:
-            st.error(f"검색 오류: {e}")
+        if errors and len(all_ids) == 0:
+            st.error("모든 검색이 실패했습니다. 오류 내용:\n\n" + "\n".join(errors[:5]))
             st.stop()
 
-        status_box.markdown(f"📥 **{len(all_ids)}개** 영상 상세정보 가져오는 중...")
+        status_box.markdown(f"📥 **{len(all_ids)}개** 영상 상세정보 수집 중...")
         progress_bar.progress(1.0, text="영상 정보 수집 중...")
 
         try:
             rows = fetch_details(youtube, list(all_ids.keys()))
         except HttpError as e:
-            st.error(f"YouTube API 오류: {e}")
+            st.error(f"YouTube API 오류 (videos.list): {e}")
             st.stop()
+        except Exception as e:
+            st.error(f"상세정보 수집 오류: {e}")
+            st.stop()
+
+        # 콘텐츠 유형 필터
+        if content_type == "🎬 롱폼만":
+            rows = [r for r in rows if not r["_is_short"]]
+        elif content_type == "🩳 숏폼만":
+            rows = [r for r in rows if r["_is_short"]]
 
         # 조회수 필터
         if min_views > 0:
@@ -628,7 +697,7 @@ def main():
             render_card(row, t)
 
     with tab2:
-        df = pd.DataFrame(filtered).drop(columns=["썸네일", "_channel_id"])
+        df = pd.DataFrame(filtered).drop(columns=["썸네일", "_channel_id", "_is_short"])
         st.dataframe(
             df,
             use_container_width=True,
