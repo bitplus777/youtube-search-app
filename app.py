@@ -215,6 +215,41 @@ def calculate_grade(subs: int, views: int, days: int) -> str:
 
 
 # ── YouTube API ───────────────────────────────────────────────────────────────
+def _classify_api_error(err_str: str) -> dict:
+    """HttpError 문자열을 분석해 사용자 친화적 메시지와 stop 여부를 반환."""
+    e = err_str.lower()
+    if "quotaexceeded" in e or "dailylimitexceeded" in e:
+        return {
+            "stop": True,
+            "msg": (
+                "🚫 **오늘 API 할당량(10,000 쿼타)이 소진되었습니다.**\n\n"
+                "- 쿼타는 **매일 오전 9시(한국 시간)** 에 초기화됩니다.\n"
+                "- 지금 당장 사용하려면 **Google Cloud Console**에서 "
+                "새 프로젝트를 만들고 새 API 키를 발급받으세요.\n"
+                "- [🔗 Google Cloud Console](https://console.cloud.google.com/)"
+            ),
+        }
+    if "keyinvalid" in e or "api key not valid" in e or "bad request" in e:
+        return {
+            "stop": True,
+            "msg": (
+                "❌ **API 키가 올바르지 않습니다.**\n\n"
+                "사이드바의 API 키를 확인하고 다시 입력해 주세요."
+            ),
+        }
+    if "accessnotconfigured" in e or "youtube data api" in e:
+        return {
+            "stop": True,
+            "msg": (
+                "❌ **YouTube Data API v3가 활성화되지 않았습니다.**\n\n"
+                "[Google Cloud Console → API 라이브러리](https://console.cloud.google.com/apis/library/youtube.googleapis.com) "
+                "에서 YouTube Data API v3를 활성화해 주세요."
+            ),
+        }
+    # 일시적 오류(5xx 등) → stop 불필요
+    return {"stop": False, "msg": f"일부 키워드 검색 실패: {err_str[:80]}"}
+
+
 def get_client(api_key: str):
     if not api_key:
         return None
@@ -615,6 +650,8 @@ def main():
         progress_bar = st.progress(0, text="검색 준비 중...")
         status_box = st.empty()
 
+        fatal_error = None
+
         for idx, kw in enumerate(keywords_to_search):
             status_box.markdown(
                 f"🔍 **{idx+1}/{total}** 검색 중: `{kw}` "
@@ -629,16 +666,14 @@ def main():
                         all_ids[vid] = kw
             except HttpError as e:
                 err_str = str(e)
-                if "quotaExceeded" in err_str:
-                    st.warning("⚠️ API 일일 할당량 초과. 지금까지 수집된 결과를 표시합니다.")
-                    break
-                errors.append(f"`{kw}`: {err_str[:120]}")
-                # 첫 오류 즉시 표시 (API 키 문제 등 조기 감지)
-                if idx == 0 and len(errors) == 1:
-                    st.error(f"첫 번째 검색 오류 — API 키를 확인하세요:\n\n{errors[0]}")
-                    st.stop()
-                continue
+                fatal_error = _classify_api_error(err_str)
+                if fatal_error["stop"]:
+                    break        # 할당량·인증 오류 → 루프 중단
+                errors.append(kw)
+                continue        # 일시적 오류 → 다음 키워드
             except Exception as e:
+                status_box.empty()
+                progress_bar.empty()
                 st.error(f"예상치 못한 오류: {e}")
                 st.stop()
 
@@ -647,21 +682,31 @@ def main():
             if total > 1:
                 time.sleep(0.05)
 
-        if errors and len(all_ids) == 0:
-            st.error("모든 검색이 실패했습니다. 오류 내용:\n\n" + "\n".join(errors[:5]))
+        status_box.empty()
+        progress_bar.empty()
+
+        # ── 오류 처리 ──────────────────────────────────────────────────────────
+        if fatal_error:
+            if len(all_ids) == 0:
+                st.error(fatal_error["msg"])
+                st.stop()
+            else:
+                st.warning(fatal_error["msg"] + f" (지금까지 수집된 {len(all_ids)}개로 결과를 표시합니다.)")
+
+        if len(all_ids) == 0:
+            st.warning("검색 결과가 없습니다. 다른 키워드나 필터를 시도해 보세요.")
             st.stop()
 
-        status_box.markdown(f"📥 **{len(all_ids)}개** 영상 상세정보 수집 중...")
-        progress_bar.progress(1.0, text="영상 정보 수집 중...")
-
-        try:
-            rows = fetch_details(youtube, list(all_ids.keys()))
-        except HttpError as e:
-            st.error(f"YouTube API 오류 (videos.list): {e}")
-            st.stop()
-        except Exception as e:
-            st.error(f"상세정보 수집 오류: {e}")
-            st.stop()
+        with st.spinner(f"📥 {len(all_ids)}개 영상 상세정보 수집 중..."):
+            try:
+                rows = fetch_details(youtube, list(all_ids.keys()))
+            except HttpError as e:
+                err = _classify_api_error(str(e))
+                st.error(err["msg"])
+                st.stop()
+            except Exception as e:
+                st.error(f"상세정보 수집 오류: {e}")
+                st.stop()
 
         # 콘텐츠 유형 필터
         if content_type == "🎬 롱폼만":
