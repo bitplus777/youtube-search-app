@@ -480,7 +480,11 @@ def main():
     # ── 사이드바 ──────────────────────────────────────────────────────────────
     with st.sidebar:
         st.markdown("### 🔑 API 키")
-        env_key = os.getenv("YOUTUBE_API_KEY", "")
+        # .env → Streamlit Secrets → 사용자 직접 입력 순으로 우선순위
+        env_key = (
+            os.getenv("YOUTUBE_API_KEY", "")
+            or st.secrets.get("YOUTUBE_API_KEY", "")
+        )
         api_input = st.text_input("YouTube API Key", value=env_key,
                                   type="password", placeholder="AIza...")
         api_key = api_input.strip() or env_key
