@@ -1,4 +1,4 @@
-"""검색 기록 저장/불러오기/삭제 - SQLite 기반"""
+"""검색 기록 저장/불러오기/삭제 + 쿼타 추적 - SQLite 기반"""
 
 import sqlite3
 import uuid
@@ -44,6 +44,12 @@ def init_db():
             duration     TEXT,
             thumbnail    TEXT,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS quota_log (
+            date    TEXT PRIMARY KEY,
+            units   INTEGER DEFAULT 0,
+            calls   INTEGER DEFAULT 0
         );
         """)
 
@@ -138,3 +144,56 @@ def rename_session(session_id: str, new_name: str):
     init_db()
     with _conn() as con:
         con.execute("UPDATE sessions SET name = ? WHERE id = ?", (new_name, session_id))
+
+
+# ── 쿼타 추적 ─────────────────────────────────────────────────────────────────
+def add_quota(units: int, calls: int = 1):
+    """오늘 사용한 쿼타 추가."""
+    init_db()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _conn() as con:
+        row = con.execute("SELECT units, calls FROM quota_log WHERE date=?", (today,)).fetchone()
+        if row:
+            con.execute(
+                "UPDATE quota_log SET units=units+?, calls=calls+? WHERE date=?",
+                (units, calls, today),
+            )
+        else:
+            con.execute(
+                "INSERT INTO quota_log (date, units, calls) VALUES (?,?,?)",
+                (today, units, calls),
+            )
+
+
+def get_today_quota() -> dict:
+    """오늘 사용한 쿼타 현황."""
+    init_db()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _conn() as con:
+        row = con.execute("SELECT units, calls FROM quota_log WHERE date=?", (today,)).fetchone()
+    return {"units": row["units"] if row else 0, "calls": row["calls"] if row else 0}
+
+
+def get_quota_history(days: int = 7) -> list[dict]:
+    """최근 N일 쿼타 이력."""
+    init_db()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT date, units, calls FROM quota_log ORDER BY date DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_total_stats() -> dict:
+    """전체 누적 통계."""
+    init_db()
+    with _conn() as con:
+        total_sessions = con.execute("SELECT COUNT(*) as n FROM sessions").fetchone()["n"]
+        total_videos = con.execute("SELECT COUNT(*) as n FROM results").fetchone()["n"]
+        total_quota = con.execute("SELECT SUM(units) as n FROM quota_log").fetchone()["n"] or 0
+    return {
+        "sessions": total_sessions,
+        "videos": total_videos,
+        "quota": total_quota,
+    }

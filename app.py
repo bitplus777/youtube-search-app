@@ -1,12 +1,13 @@
 """
 유튜브 한국 여행 채널 발굴 앱
-등급 기준: S급(원석) → A급(신진) → B급(성장) → C급(일반)
 """
 
+import json
 import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,662 +15,474 @@ from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from keywords import (
-    filter_keywords,
-    get_all_categories,
-    get_all_languages,
-    keyword_count,
+import auth
+from db import (
+    add_quota, delete_session, get_quota_history, get_today_quota,
+    get_total_stats, list_sessions, load_session, rename_session, save_session,
 )
-from db import delete_session, list_sessions, load_session, rename_session, save_session
+from keywords import filter_keywords, get_all_categories, get_all_languages
 
 load_dotenv()
 
-# ── 등급 정의 ─────────────────────────────────────────────────────────────────
+DAILY_QUOTA = 10_000
+
+# ── 등급 ──────────────────────────────────────────────────────────────────────
 GRADES = {
-    "S": {
-        "label": "S급",
-        "icon": "🏆",
-        "color": "#FFD700",
-        "bg": "linear-gradient(135deg,#1a1200 0%,#2a1e00 100%)",
-        "border": "#FFD700",
-        "desc": "구독자 1만↓ · 업로드 7일↓ · 조회수 1만↓",
-        "badge": "background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;",
-        "glow": "0 0 20px rgba(255,215,0,0.4)",
-    },
-    "A": {
-        "label": "A급",
-        "icon": "⭐",
-        "color": "#00CFFF",
-        "bg": "linear-gradient(135deg,#001520 0%,#002030 100%)",
-        "border": "#00CFFF",
-        "desc": "구독자 5만↓ · 업로드 30일↓ · 조회수 5만↓",
-        "badge": "background:linear-gradient(135deg,#00CFFF,#0090CC);color:#000;",
-        "glow": "0 0 20px rgba(0,207,255,0.3)",
-    },
-    "B": {
-        "label": "B급",
-        "icon": "🌱",
-        "color": "#4CAF50",
-        "bg": "linear-gradient(135deg,#071507 0%,#0d200d 100%)",
-        "border": "#4CAF50",
-        "desc": "구독자 20만↓ · 업로드 90일↓",
-        "badge": "background:linear-gradient(135deg,#4CAF50,#2E7D32);color:#fff;",
-        "glow": "0 0 20px rgba(76,175,80,0.25)",
-    },
-    "C": {
-        "label": "C급",
-        "icon": "📺",
-        "color": "#9E9E9E",
-        "bg": "linear-gradient(135deg,#141414 0%,#1e1e1e 100%)",
-        "border": "#444",
-        "desc": "대형 채널 또는 오래된 영상",
-        "badge": "background:linear-gradient(135deg,#555,#333);color:#ccc;",
-        "glow": "none",
-    },
+    "S": {"label":"S급","icon":"🏆","color":"#FFD700","bg":"#1a1200","border":"#FFD700",
+          "desc":"구독자 1만↓ · 7일↓ · 조회수 1만↓","badge":"background:linear-gradient(135deg,#FFD700,#FFA500);color:#000;",
+          "glow":"0 0 18px rgba(255,215,0,0.35)"},
+    "A": {"label":"A급","icon":"⭐","color":"#00CFFF","bg":"#001520","border":"#00CFFF",
+          "desc":"구독자 5만↓ · 30일↓ · 조회수 5만↓","badge":"background:linear-gradient(135deg,#00CFFF,#0090CC);color:#000;",
+          "glow":"0 0 18px rgba(0,207,255,0.25)"},
+    "B": {"label":"B급","icon":"🌱","color":"#4CAF50","bg":"#071507","border":"#4CAF50",
+          "desc":"구독자 20만↓ · 90일↓","badge":"background:linear-gradient(135deg,#4CAF50,#2E7D32);color:#fff;",
+          "glow":"0 0 18px rgba(76,175,80,0.2)"},
+    "C": {"label":"C급","icon":"📺","color":"#9E9E9E","bg":"#141414","border":"#444",
+          "desc":"대형 채널 또는 오래된 영상","badge":"background:linear-gradient(135deg,#555,#333);color:#ccc;",
+          "glow":"none"},
 }
 
-DURATION_FILTERS = {
-    "전체": None,
-    "짧은 영상 (4분 미만)": "short",
-    "중간 영상 (4~20분)": "medium",
-    "긴 영상 (20분 초과)": "long",
-}
+DURATION_FILTERS = {"전체":None,"짧은 영상 (4분 미만)":"short","중간 영상 (4~20분)":"medium","긴 영상 (20분 초과)":"long"}
+SORT_OPTIONS     = {"관련성":"relevance","최신순":"date","조회수":"viewCount"}
 
-SORT_OPTIONS = {
-    "관련성": "relevance",
-    "최신순": "date",
-    "조회수": "viewCount",
-}
-
-THEMES = {
-    "dark": {
-        "bg": "#0d0d0d",
-        "card_bg": "#161616",
-        "card_border": "#2a2a2a",
-        "sidebar_bg": "#111",
-        "text": "#f0f0f0",
-        "sub": "#888",
-        "divider": "#2a2a2a",
-        "meta_bg": "#1e1e1e",
-        "badge_bg": "rgba(0,0,0,0.85)",
-        "input_bg": "#1a1a1a",
-        "hero_from": "#1a0000",
-        "hero_to": "#0d0d0d",
-        "tag_bg": "rgba(255,255,255,0.06)",
-    },
-    "light": {
-        "bg": "#f0f2f5",
-        "card_bg": "#ffffff",
-        "card_border": "#e0e0e0",
-        "sidebar_bg": "#fafafa",
-        "text": "#111",
-        "sub": "#666",
-        "divider": "#e0e0e0",
-        "meta_bg": "#f5f5f5",
-        "badge_bg": "rgba(0,0,0,0.7)",
-        "input_bg": "#fff",
-        "hero_from": "#fff0f0",
-        "hero_to": "#f0f2f5",
-        "tag_bg": "rgba(0,0,0,0.05)",
-    },
-}
-
+NAV_ITEMS = [
+    ("search",  "채널 발굴"),
+    ("history", "검색 기록"),
+    ("mypage",  "마이페이지"),
+    ("apikeys", "API 키 관리"),
+]
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
-def build_css(t: dict) -> str:
-    return f"""
+GLOBAL_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
+*, *::before, *::after{box-sizing:border-box}
 
-/* ── 전체 기반 ── */
-.stApp,.main,.block-container{{
-  background:{t['bg']}!important;
-  color:{t['text']}!important;
+/* ── 전체 ── */
+.stApp,.main,.block-container{
+  background:#0d0d0d!important;
+  color:#f0f0f0!important;
   font-family:'Noto Sans KR',sans-serif!important;
-}}
-.block-container{{padding-top:1rem!important;max-width:1400px!important}}
-section[data-testid="stSidebar"]{{
-  background:{t['sidebar_bg']}!important;
-  border-right:1px solid {t['divider']}!important;
-}}
-section[data-testid="stSidebar"] *{{color:{t['text']}!important}}
+}
+.block-container{padding-top:.6rem!important;max-width:1380px!important}
 
-/* ── 입력 컴포넌트 ── */
-.stTextInput input,.stSelectbox select,.stNumberInput input{{
-  background:{t['input_bg']}!important;
-  color:{t['text']}!important;
-  border:1px solid {t['divider']}!important;
+/* ── 사이드바 ── */
+section[data-testid="stSidebar"]{
+  background:#111!important;
+  border-right:1px solid #1e1e1e!important;
+  min-width:220px!important;
+}
+section[data-testid="stSidebar"] *{color:#f0f0f0!important}
+section[data-testid="stSidebar"] .stButton>button{
+  background:transparent!important;
+  border:none!important;
+  text-align:left!important;
+  padding:8px 14px!important;
+  font-size:13px!important;
+  font-weight:500!important;
+  color:#aaa!important;
   border-radius:8px!important;
-}}
-.stTextInput input:focus,.stSelectbox select:focus{{
-  border-color:#ff0000!important;
-  box-shadow:0 0 0 2px rgba(255,0,0,0.15)!important;
-}}
-.stTextArea textarea{{
-  background:{t['input_bg']}!important;
-  color:{t['text']}!important;
-  border:1px solid {t['divider']}!important;
-  border-radius:8px!important;
-}}
-div[data-baseweb="select"] > div{{
-  background:{t['input_bg']}!important;
-  border:1px solid {t['divider']}!important;
-  border-radius:8px!important;
-}}
+  width:100%!important;
+  transition:all .15s!important;
+}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  background:#1e1e1e!important;
+  color:#fff!important;
+}
+
+/* ── 입력 ── */
+.stTextInput input,.stSelectbox select,.stNumberInput input{
+  background:#1a1a1a!important;color:#f0f0f0!important;
+  border:1px solid #2a2a2a!important;border-radius:8px!important;
+}
+.stTextInput input:focus{border-color:#e53935!important;box-shadow:0 0 0 2px rgba(229,57,53,.15)!important}
+div[data-baseweb="select"]>div{
+  background:#1a1a1a!important;border:1px solid #2a2a2a!important;border-radius:8px!important;
+}
 
 /* ── 탭 ── */
-.stTabs [data-baseweb="tab-list"]{{
-  background:{t['card_bg']}!important;
-  border-bottom:2px solid {t['divider']}!important;
-  gap:4px;
-  border-radius:12px 12px 0 0;
-  padding:4px 4px 0;
-}}
-.stTabs [data-baseweb="tab"]{{
-  color:{t['sub']}!important;
-  font-weight:600;
-  font-size:14px;
-  border-radius:8px 8px 0 0;
-  padding:10px 20px!important;
-  transition:all .2s;
-}}
-.stTabs [aria-selected="true"]{{
-  color:#ff0000!important;
-  border-bottom:3px solid #ff0000!important;
-  background:rgba(255,0,0,0.05)!important;
-}}
-div[data-testid="stMarkdownContainer"] *{{color:{t['text']}!important}}
+.stTabs [data-baseweb="tab-list"]{
+  background:#161616!important;border-bottom:2px solid #222!important;
+  border-radius:10px 10px 0 0;padding:4px 4px 0;gap:4px;
+}
+.stTabs [data-baseweb="tab"]{
+  color:#888!important;font-weight:600;font-size:13px;
+  border-radius:8px 8px 0 0;padding:9px 18px!important;
+}
+.stTabs [aria-selected="true"]{
+  color:#e53935!important;
+  border-bottom:3px solid #e53935!important;
+  background:rgba(229,57,53,.07)!important;
+}
 
-/* ── 버튼 ── */
-.stButton > button{{
-  border-radius:10px!important;
-  font-weight:700!important;
-  font-size:13px!important;
-  transition:all .2s!important;
-  border:1px solid {t['divider']}!important;
-}}
-.stButton > button[kind="primary"]{{
-  background:linear-gradient(135deg,#ff0000,#cc0000)!important;
-  color:#fff!important;
-  border:none!important;
-  box-shadow:0 4px 15px rgba(255,0,0,0.35)!important;
-}}
-.stButton > button[kind="primary"]:hover{{
+/* ── 기본 버튼 ── */
+.stButton>button{
+  border-radius:9px!important;font-weight:700!important;
+  font-size:13px!important;transition:all .18s!important;
+  border:1px solid #2a2a2a!important;
+}
+.stButton>button[kind="primary"]{
+  background:linear-gradient(135deg,#e53935,#b71c1c)!important;
+  color:#fff!important;border:none!important;
+  box-shadow:0 4px 14px rgba(229,57,53,.35)!important;
+}
+.stButton>button[kind="primary"]:hover{
   transform:translateY(-1px);
-  box-shadow:0 6px 20px rgba(255,0,0,0.5)!important;
-}}
-
-/* ── 히어로 헤더 ── */
-.hero-header{{
-  background:linear-gradient(135deg,{t['hero_from']} 0%,{t['bg']} 100%);
-  border:1px solid {t['divider']};
-  border-radius:16px;
-  padding:24px 32px;
-  margin-bottom:20px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:16px;
-}}
-.hero-title{{
-  font-size:28px;
-  font-weight:900;
-  color:{t['text']};
-  margin:0;
-  line-height:1.2;
-}}
-.hero-title span{{color:#ff0000}}
-.hero-sub{{
-  font-size:13px;
-  color:{t['sub']};
-  margin:6px 0 0;
-}}
-
-/* ── 등급 요약 카드 ── */
-.grade-summary{{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}}
-.grade-box{{
-  flex:1;min-width:130px;
-  border-radius:14px;
-  padding:18px 16px;
-  text-align:center;
-  border:1px solid;
-  transition:transform .2s,box-shadow .2s;
-}}
-.grade-box:hover{{transform:translateY(-3px)}}
-.grade-count{{font-size:32px;font-weight:900;line-height:1}}
-.grade-label{{font-size:14px;font-weight:800;margin-top:6px;letter-spacing:.5px}}
-.grade-desc{{font-size:10px;opacity:.6;margin-top:4px;line-height:1.4}}
-
-/* ── 비디오 카드 ── */
-.video-card{{
-  border-radius:16px;
-  margin-bottom:16px;
-  overflow:hidden;
-  border:1px solid;
-  transition:all .25s;
-}}
-.video-card:hover{{transform:translateY(-3px)}}
-.card-inner{{display:flex;align-items:stretch}}
-.thumb-wrap{{
-  flex:0 0 260px;
-  position:relative;
-  overflow:hidden;
-  border-radius:16px 0 0 16px;
-  background:#000;
-}}
-.thumb-wrap img{{
-  width:100%;height:100%;
-  object-fit:cover;display:block;
-  transition:transform .4s;
-}}
-.video-card:hover .thumb-wrap img{{transform:scale(1.06)}}
-.dur-badge{{
-  position:absolute;bottom:8px;right:8px;
-  background:{t['badge_bg']};color:#fff;
-  font-size:11px;font-weight:700;
-  padding:3px 8px;border-radius:6px;
-  backdrop-filter:blur(4px);
-}}
-.grade-badge{{
-  position:absolute;top:8px;left:8px;
-  font-size:11px;font-weight:900;
-  padding:4px 12px;border-radius:20px;
-  letter-spacing:.5px;
-  box-shadow:0 2px 8px rgba(0,0,0,.5);
-}}
-.card-info{{
-  flex:1;padding:18px 22px;
-  display:flex;flex-direction:column;gap:8px;min-width:0;
-}}
-.v-title{{
-  font-size:15px;font-weight:700;
-  color:{t['text']};line-height:1.5;
-  margin:0;word-break:break-word;
-}}
-.v-title a{{color:{t['text']};text-decoration:none}}
-.v-title a:hover{{color:#ff0000}}
-.ch-row{{
-  display:flex;align-items:center;gap:8px;
-  font-size:13px;color:{t['sub']};font-weight:600;
-}}
-.stats-row{{
-  display:flex;flex-wrap:wrap;gap:12px;
-  margin-top:8px;padding-top:10px;
-  border-top:1px solid {t['divider']};
-}}
-.stat-item{{display:flex;flex-direction:column;gap:2px}}
-.s-label{{
-  font-size:9px;color:{t['sub']};
-  text-transform:uppercase;letter-spacing:.8px;font-weight:700;
-}}
-.s-val{{font-size:15px;font-weight:800;color:{t['text']}}}
-.s-val.red{{color:#ff4444}}
-.s-val.gold{{color:#FFD700}}
-.tag-row{{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}}
-.tag{{
-  font-size:11px;color:{t['sub']};
-  background:{t['tag_bg']};
-  border:1px solid {t['divider']};
-  border-radius:6px;padding:2px 10px;
-  font-weight:500;
-}}
-.watch-btn{{
-  display:inline-flex;align-items:center;gap:6px;
-  margin-top:10px;align-self:flex-start;
-  background:linear-gradient(135deg,#ff0000,#cc0000);
-  color:#fff!important;
-  font-size:12px;font-weight:700;
-  padding:8px 20px;border-radius:20px;
-  text-decoration:none!important;
-  transition:all .2s;
-  box-shadow:0 3px 12px rgba(255,0,0,0.3);
-}}
-.watch-btn:hover{{
-  transform:translateY(-1px);
-  box-shadow:0 5px 18px rgba(255,0,0,0.5);
-}}
-
-/* ── API 키 카드 ── */
-.api-key-card{{
-  background:{t['card_bg']};
-  border:1px solid {t['divider']};
-  border-radius:12px;
-  padding:12px;
-  margin-bottom:8px;
-}}
-.key-status-ok{{
-  display:inline-flex;align-items:center;gap:4px;
-  font-size:11px;color:#4CAF50;font-weight:700;
-}}
-.key-status-empty{{
-  display:inline-flex;align-items:center;gap:4px;
-  font-size:11px;color:{t['sub']};font-weight:600;
-}}
-
-/* ── 검색 기록 ── */
-.hist-card{{
-  background:{t['card_bg']};
-  border:1px solid {t['divider']};
-  border-radius:14px;
-  padding:16px 20px;
-  margin-bottom:12px;
-  transition:border-color .2s;
-}}
-.hist-card:hover{{border-color:#ff0000}}
-.hist-name{{font-size:16px;font-weight:800;color:{t['text']}}}
-.hist-meta{{font-size:12px;color:{t['sub']};margin-top:4px}}
-.hist-grade-row{{
-  display:flex;gap:8px;margin-top:10px;flex-wrap:wrap
-}}
-.hg-badge{{
-  font-size:12px;font-weight:700;
-  padding:3px 12px;border-radius:20px;
-}}
+  box-shadow:0 6px 20px rgba(229,57,53,.5)!important;
+}
 
 /* ── 스크롤바 ── */
-::-webkit-scrollbar{{width:6px;height:6px}}
-::-webkit-scrollbar-track{{background:{t['bg']}}}
-::-webkit-scrollbar-thumb{{background:#444;border-radius:3px}}
-::-webkit-scrollbar-thumb:hover{{background:#666}}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#0d0d0d}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
 
-/* ── 알림 박스 ── */
-div[data-testid="stNotification"]{{border-radius:12px!important}}
-div[data-testid="stInfo"]{{border-radius:10px!important}}
+/* ── 카드 ── */
+.app-card{
+  background:#161616;border:1px solid #222;
+  border-radius:14px;padding:20px 22px;margin-bottom:14px;
+  transition:border-color .2s,box-shadow .2s;
+}
+.app-card:hover{border-color:#333;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+
+/* ── 등급 요약 ── */
+.grade-summary{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.grade-box{
+  flex:1;min-width:120px;border-radius:14px;
+  padding:16px;text-align:center;border:1px solid;
+  transition:transform .2s,box-shadow .2s;
+}
+.grade-box:hover{transform:translateY(-3px)}
+.grade-count{font-size:30px;font-weight:900;line-height:1}
+.grade-label{font-size:13px;font-weight:800;margin-top:5px;letter-spacing:.4px}
+.grade-desc{font-size:10px;opacity:.55;margin-top:3px;line-height:1.4}
+
+/* ── 비디오 카드 ── */
+.video-card{
+  border-radius:14px;margin-bottom:14px;overflow:hidden;
+  border:1px solid;transition:all .22s;
+}
+.video-card:hover{transform:translateY(-3px)}
+.card-inner{display:flex;align-items:stretch}
+.thumb-wrap{
+  flex:0 0 240px;position:relative;overflow:hidden;
+  border-radius:14px 0 0 14px;background:#000;
+}
+.thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .35s}
+.video-card:hover .thumb-wrap img{transform:scale(1.06)}
+.dur-badge{
+  position:absolute;bottom:7px;right:7px;
+  background:rgba(0,0,0,.82);color:#fff;
+  font-size:11px;font-weight:700;padding:2px 7px;
+  border-radius:5px;backdrop-filter:blur(3px);
+}
+.grade-badge{
+  position:absolute;top:7px;left:7px;font-size:11px;font-weight:900;
+  padding:3px 10px;border-radius:18px;box-shadow:0 2px 8px rgba(0,0,0,.5);
+}
+.card-info{flex:1;padding:16px 20px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.v-title{font-size:14px;font-weight:700;color:#f0f0f0;line-height:1.5;margin:0;word-break:break-word}
+.v-title a{color:#f0f0f0;text-decoration:none}
+.v-title a:hover{color:#e53935}
+.ch-row{font-size:12px;color:#888;font-weight:600}
+.stats-row{
+  display:flex;flex-wrap:wrap;gap:12px;
+  margin-top:8px;padding-top:8px;border-top:1px solid #222;
+}
+.stat-item{display:flex;flex-direction:column;gap:2px}
+.s-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.8px;font-weight:700}
+.s-val{font-size:14px;font-weight:800;color:#f0f0f0}
+.s-val.red{color:#ff4444}.s-val.gold{color:#FFD700}
+.tag-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:3px}
+.tag{font-size:11px;color:#666;background:#1e1e1e;border:1px solid #2a2a2a;border-radius:5px;padding:2px 9px}
+.watch-btn{
+  display:inline-flex;align-items:center;gap:5px;margin-top:8px;align-self:flex-start;
+  background:linear-gradient(135deg,#e53935,#b71c1c);color:#fff!important;
+  font-size:12px;font-weight:700;padding:7px 18px;border-radius:18px;
+  text-decoration:none!important;transition:all .18s;
+  box-shadow:0 3px 10px rgba(229,57,53,.3);
+}
+.watch-btn:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(229,57,53,.5)}
+
+/* ── 검색 기록 카드 ── */
+.hist-card{
+  background:#161616;border:1px solid #222;border-radius:14px;
+  padding:16px 18px;margin-bottom:10px;transition:border-color .2s;
+}
+.hist-card:hover{border-color:#e53935}
+.hist-name{font-size:15px;font-weight:800;color:#f0f0f0}
+.hist-meta{font-size:12px;color:#666;margin-top:3px}
+
+/* ── 마이페이지 ── */
+.profile-card{
+  background:linear-gradient(135deg,#1a0000 0%,#161616 100%);
+  border:1px solid #2a2a2a;border-radius:16px;padding:28px 24px;
+  display:flex;align-items:center;gap:20px;margin-bottom:20px;
+}
+.avatar{
+  width:64px;height:64px;border-radius:50%;
+  background:linear-gradient(135deg,#e53935,#b71c1c);
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;font-weight:900;color:#fff;flex-shrink:0;
+}
+.stat-card{
+  background:#161616;border:1px solid #222;border-radius:12px;
+  padding:16px 18px;text-align:center;
+}
+.stat-num{font-size:26px;font-weight:900;color:#e53935;line-height:1}
+.stat-lbl{font-size:12px;color:#666;margin-top:4px;font-weight:600}
+
+/* ── 쿼타 바 ── */
+.quota-bar-wrap{
+  background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:14px 18px;
+}
+.quota-bar-bg{background:#222;border-radius:6px;height:10px;margin:8px 0}
+.quota-bar-fill{height:10px;border-radius:6px;transition:width .4s}
+
+/* ── 로그인 폼 ── */
+.login-wrap{
+  max-width:400px;margin:60px auto;
+  background:#161616;border:1px solid #2a2a2a;border-radius:18px;padding:36px 32px;
+}
+.login-logo{text-align:center;margin-bottom:28px}
+.login-logo h1{font-size:26px;font-weight:900;color:#f0f0f0;margin:0}
+.login-logo h1 span{color:#e53935}
+.login-logo p{font-size:13px;color:#666;margin:6px 0 0}
+
+/* ── 네비 섹션 헤더 ── */
+.nav-section{
+  font-size:10px;font-weight:800;color:#444;
+  text-transform:uppercase;letter-spacing:1px;
+  padding:14px 14px 4px;margin:0;
+}
+.nav-active button{
+  background:#1e1e1e!important;color:#fff!important;
+  border-left:3px solid #e53935!important;
+  padding-left:11px!important;
+}
+
+/* ── 상단 바 ── */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0 14px;border-bottom:1px solid #1e1e1e;margin-bottom:18px;
+}
+.topbar-title{font-size:20px;font-weight:900;color:#f0f0f0}
+.topbar-title span{color:#e53935}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.quota-chip{
+  background:#1a1a1a;border:1px solid #2a2a2a;border-radius:20px;
+  padding:5px 14px;font-size:12px;font-weight:700;color:#aaa;
+}
+.quota-chip b{color:#e53935}
+.user-chip{
+  background:linear-gradient(135deg,#e53935,#b71c1c);
+  border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;color:#fff;
+}
 </style>
 """
 
 
-# ── 유틸리티 ──────────────────────────────────────────────────────────────────
-def fmt_num(n: int) -> str:
-    if n >= 100_000_000:
-        return f"{n/100_000_000:.1f}억"
-    if n >= 10_000:
-        return f"{n/10_000:.1f}만"
+# ── 유틸 ──────────────────────────────────────────────────────────────────────
+def fmt(n: int) -> str:
+    if n >= 100_000_000: return f"{n/100_000_000:.1f}억"
+    if n >= 10_000:      return f"{n/10_000:.1f}만"
     return f"{n:,}"
 
 
 def parse_duration(d: str) -> str:
-    if not d:
-        return ""
+    if not d: return ""
     m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d)
-    if not m:
-        return d
+    if not m: return d
     h, mi, s = (int(g or 0) for g in m.groups())
     return f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
 
 
 def duration_seconds(d: str) -> int:
-    if not d:
-        return 0
+    if not d: return 0
     m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d)
-    if not m:
-        return 0
+    if not m: return 0
     h, mi, s = (int(g or 0) for g in m.groups())
-    return h * 3600 + mi * 60 + s
+    return h*3600 + mi*60 + s
 
 
-def is_shorts(raw_duration: str, title: str) -> bool:
-    secs = duration_seconds(raw_duration)
-    title_lower = title.lower()
-    has_tag = "#shorts" in title_lower or "#short" in title_lower
-    return (0 < secs <= 60) or has_tag
+def is_shorts(raw: str, title: str) -> bool:
+    s = duration_seconds(raw)
+    tl = title.lower()
+    return (0 < s <= 60) or "#shorts" in tl or "#short" in tl
 
 
-def days_since(published_at: str) -> int:
+def days_ago(pub: str) -> int:
     try:
-        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - dt).days
     except Exception:
         return 9999
 
 
-def calculate_grade(subs: int, views: int, days: int) -> str:
-    if subs < 10_000 and views < 10_000 and days <= 7:
-        return "S"
-    if subs < 50_000 and views < 50_000 and days <= 30:
-        return "A"
-    if subs < 200_000 and days <= 90:
-        return "B"
+def grade(subs: int, views: int, d: int) -> str:
+    if subs < 10_000 and views < 10_000 and d <= 7:  return "S"
+    if subs < 50_000 and views < 50_000 and d <= 30: return "A"
+    if subs < 200_000 and d <= 90:                   return "B"
     return "C"
 
 
-# ── YouTube API (멀티 키 지원) ─────────────────────────────────────────────────
-def _classify_api_error(err_str: str) -> dict:
-    e = err_str.lower()
+# ── API 키 ────────────────────────────────────────────────────────────────────
+def _classify(err: str) -> dict:
+    e = err.lower()
     if "quotaexceeded" in e or "dailylimitexceeded" in e:
-        return {
-            "type": "quota",
-            "stop": True,
-            "msg": (
-                "🚫 **API 할당량(10,000 쿼타)이 소진되었습니다.**\n\n"
-                "- 쿼타는 **매일 오전 9시(한국 시간)** 에 초기화됩니다.\n"
-                "- 사이드바에 **다른 API 키**가 등록되어 있으면 자동으로 전환됩니다.\n"
-                "- [🔗 Google Cloud Console](https://console.cloud.google.com/)"
-            ),
-        }
-    if "keyinvalid" in e or "api key not valid" in e or "bad request" in e:
-        return {
-            "type": "key_invalid",
-            "stop": True,
-            "msg": "❌ **API 키가 올바르지 않습니다.** 사이드바의 API 키를 확인해 주세요.",
-        }
-    if "accessnotconfigured" in e or "youtube data api" in e:
-        return {
-            "type": "not_configured",
-            "stop": True,
-            "msg": (
-                "❌ **YouTube Data API v3가 활성화되지 않았습니다.**\n\n"
-                "[Google Cloud Console → API 라이브러리](https://console.cloud.google.com/apis/library/youtube.googleapis.com) "
-                "에서 YouTube Data API v3를 활성화해 주세요."
-            ),
-        }
-    return {"type": "other", "stop": False, "msg": f"일부 키워드 검색 실패: {err_str[:80]}"}
-
-
-def get_client(api_key: str):
-    if not api_key:
-        return None
-    try:
-        return build("youtube", "v3", developerKey=api_key)
-    except Exception:
-        return None
+        return {"type":"quota","stop":True,"msg":"🚫 API 할당량이 소진되었습니다. 다른 키로 자동 전환을 시도합니다."}
+    if "keyinvalid" in e or "api key not valid" in e:
+        return {"type":"key_invalid","stop":True,"msg":"❌ API 키가 올바르지 않습니다."}
+    if "accessnotconfigured" in e:
+        return {"type":"not_configured","stop":True,
+                "msg":"❌ YouTube Data API v3가 비활성화 상태입니다. [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com)에서 활성화해 주세요."}
+    return {"type":"other","stop":False,"msg":f"오류: {err[:80]}"}
 
 
 def get_valid_keys() -> list[str]:
-    """세션에 등록된 API 키 목록(비어있지 않은 것만)."""
-    env_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-    secret_key = ""
+    saved = auth.load_api_keys()
+    env_k = os.getenv("YOUTUBE_API_KEY","").strip()
     try:
-        secret_key = st.secrets.get("YOUTUBE_API_KEY", "").strip()
+        sec_k = st.secrets.get("YOUTUBE_API_KEY","").strip()
     except Exception:
-        pass
-
-    keys_input = st.session_state.get("api_keys_raw", ["", "", "", "", ""])
-    manual_keys = [k.strip() for k in keys_input if k.strip()]
-
-    seen, result = set(), []
-    for k in ([env_key, secret_key] + manual_keys):
+        sec_k = ""
+    manual = [k.strip() for k in st.session_state.get("api_keys_raw", saved) if k.strip()]
+    seen, out = set(), []
+    for k in ([env_k, sec_k] + manual):
         if k and k not in seen:
-            seen.add(k)
-            result.append(k)
-    return result
+            seen.add(k); out.append(k)
+    return out
 
 
-def rotate_to_next_key(exhausted_idx: int) -> tuple[object, int]:
-    """
-    exhausted_idx 다음 키로 전환. 성공하면 (client, new_idx), 없으면 (None, -1).
-    """
+def make_client(key: str):
+    try: return build("youtube","v3",developerKey=key)
+    except Exception: return None
+
+
+def rotate(idx: int):
     keys = get_valid_keys()
-    next_idx = exhausted_idx + 1
-    if next_idx < len(keys):
-        client = get_client(keys[next_idx])
-        if client:
-            return client, next_idx
+    ni = idx + 1
+    if ni < len(keys):
+        c = make_client(keys[ni])
+        if c: return c, ni
     return None, -1
 
 
-def search_ids(youtube, keyword: str, duration_filter: str,
-               sort_by: str, max_results: int,
-               published_after: str | None = None,
-               max_pages: int = 1) -> list[str]:
-    base_params = {
-        "part": "snippet", "q": keyword, "type": "video",
-        "order": SORT_OPTIONS.get(sort_by, "relevance"),
-        "maxResults": 50,
-    }
-    if published_after:
-        base_params["publishedAfter"] = published_after
-    dur = DURATION_FILTERS.get(duration_filter)
-    if dur:
-        base_params["videoDuration"] = dur
-
-    ids: list[str] = []
-    page_token: str | None = None
-
+# ── YouTube API ───────────────────────────────────────────────────────────────
+def search_ids(yt, kw, dur_filter, sort, max_res, pub_after=None, max_pages=1):
+    base = {"part":"snippet","q":kw,"type":"video",
+            "order":SORT_OPTIONS.get(sort,"relevance"),"maxResults":50}
+    if pub_after: base["publishedAfter"] = pub_after
+    d = DURATION_FILTERS.get(dur_filter)
+    if d: base["videoDuration"] = d
+    ids, tok = [], None
     for _ in range(max(1, max_pages)):
-        params = dict(base_params)
-        if page_token:
-            params["pageToken"] = page_token
-        resp = youtube.search().list(**params).execute()
-        ids += [item["id"]["videoId"] for item in resp.get("items", [])]
-        page_token = resp.get("nextPageToken")
-        if not page_token or len(ids) >= max_results:
-            break
+        p = dict(base)
+        if tok: p["pageToken"] = tok
+        resp = yt.search().list(**p).execute()
+        ids += [i["id"]["videoId"] for i in resp.get("items",[])]
+        tok = resp.get("nextPageToken")
+        if not tok or len(ids) >= max_res: break
+    # 쿼타 로깅: search.list = 100 units/call
+    add_quota(100 * min(max_pages, (len(ids)//50)+1), 1)
+    return ids[:max_res]
 
-    return ids[:max_results]
 
-
-def fetch_subs(youtube, channel_ids: list[str]) -> dict[str, int]:
-    result = {}
-    for i in range(0, len(channel_ids), 50):
-        chunk = channel_ids[i: i + 50]
+def fetch_subs(yt, ch_ids):
+    res = {}
+    for i in range(0, len(ch_ids), 50):
+        chunk = ch_ids[i:i+50]
         try:
-            resp = youtube.channels().list(part="statistics", id=",".join(chunk)).execute()
-            for item in resp.get("items", []):
-                s = item.get("statistics", {}).get("subscriberCount")
-                result[item["id"]] = int(s) if s else 0
+            resp = yt.channels().list(part="statistics", id=",".join(chunk)).execute()
+            for item in resp.get("items",[]):
+                s = item.get("statistics",{}).get("subscriberCount")
+                res[item["id"]] = int(s) if s else 0
+            add_quota(1, 1)
         except Exception:
             pass
-    return result
+    return res
 
 
-def fetch_details(youtube, video_ids: list[str]) -> list[dict]:
-    if not video_ids:
-        return []
-    raw, ch_ids = [], []
-    quota_hit = False
+def fetch_details(yt, video_ids):
+    if not video_ids: return []
+    raw, ch_ids, quota_hit = [], [], False
     for i in range(0, len(video_ids), 50):
-        chunk = video_ids[i: i + 50]
+        chunk = video_ids[i:i+50]
         try:
-            resp = (youtube.videos()
-                    .list(part="snippet,statistics,contentDetails", id=",".join(chunk))
-                    .execute())
+            resp = yt.videos().list(
+                part="snippet,statistics,contentDetails", id=",".join(chunk)).execute()
+            add_quota(1, 1)
         except HttpError as e:
-            if "quotaExceeded" in str(e):
-                quota_hit = True
-                break
+            if "quotaExceeded" in str(e): quota_hit = True; break
             raise
-        for item in resp.get("items", []):
+        for item in resp.get("items",[]):
             raw.append(item)
-            cid = item["snippet"].get("channelId", "")
-            if cid and cid not in ch_ids:
-                ch_ids.append(cid)
+            cid = item["snippet"].get("channelId","")
+            if cid and cid not in ch_ids: ch_ids.append(cid)
     if quota_hit and raw:
-        st.warning(f"⚠️ 쿼타 초과로 {len(raw)}개까지만 상세정보를 가져왔습니다.", icon="⚠️")
-
-    subs_map = fetch_subs(youtube, ch_ids)
+        st.warning(f"⚠️ 쿼타 초과로 {len(raw)}개까지만 가져왔습니다.")
+    subs = fetch_subs(yt, ch_ids)
     rows = []
     for item in raw:
         sn = item["snippet"]
-        stat = item.get("statistics", {})
-        cd = item.get("contentDetails", {})
+        st_ = item.get("statistics",{})
+        cd = item.get("contentDetails",{})
         vid = item["id"]
-        pub = sn.get("publishedAt", "")
-        subs = subs_map.get(sn.get("channelId", ""), 0)
-        views = int(stat.get("viewCount", 0))
-        d = days_since(pub)
-        raw_dur = cd.get("duration", "")
-        title = sn.get("title", "")
+        pub = sn.get("publishedAt","")
+        sub_n = subs.get(sn.get("channelId",""),0)
+        views = int(st_.get("viewCount",0))
+        d = days_ago(pub)
+        raw_dur = cd.get("duration","")
+        title = sn.get("title","")
         short = is_shorts(raw_dur, title)
         url = (f"https://www.youtube.com/shorts/{vid}" if short
                else f"https://www.youtube.com/watch?v={vid}")
         rows.append({
-            "등급": calculate_grade(subs, views, d),
+            "등급": grade(sub_n, views, d),
             "콘텐츠유형": "🩳 숏폼" if short else "🎬 롱폼",
-            "제목": title,
-            "채널명": sn.get("channelTitle", ""),
-            "구독자수": subs,
-            "URL": url,
-            "업로드일": pub[:10],
-            "업로드경과일": d,
+            "제목": title, "채널명": sn.get("channelTitle",""),
+            "구독자수": sub_n, "URL": url,
+            "업로드일": pub[:10], "업로드경과일": d,
             "조회수": views,
-            "좋아요": int(stat.get("likeCount", 0)),
-            "댓글수": int(stat.get("commentCount", 0)),
+            "좋아요": int(st_.get("likeCount",0)),
+            "댓글수": int(st_.get("commentCount",0)),
             "재생시간": parse_duration(raw_dur),
-            "썸네일": (sn.get("thumbnails", {}).get("high", {}).get("url", "")
-                      or sn.get("thumbnails", {}).get("medium", {}).get("url", "")),
-            "_is_short": short,
-            "_channel_id": sn.get("channelId", ""),
+            "썸네일": (sn.get("thumbnails",{}).get("high",{}).get("url","")
+                      or sn.get("thumbnails",{}).get("medium",{}).get("url","")),
+            "_is_short": short, "_channel_id": sn.get("channelId",""), "_search_kw":"",
         })
     return rows
 
 
-# ── 카드 렌더링 ───────────────────────────────────────────────────────────────
-def render_card(row: dict, t: dict):
+# ── 렌더링 ────────────────────────────────────────────────────────────────────
+def render_card(row):
     g = GRADES[row["등급"]]
     thumb = row["썸네일"]
-    is_short = row.get("_is_short", False)
-
-    thumb_style = "width:100%;height:100%;object-fit:cover;display:block;"
-    if is_short:
-        thumb_style += "aspect-ratio:9/16;"
-    thumb_html = (f'<img src="{thumb}" alt="썸네일" style="{thumb_style}">' if thumb
-                  else f'<div style="background:#1a1a1a;width:100%;height:160px;'
-                       f'display:flex;align-items:center;justify-content:center;'
-                       f'font-size:40px;">🎬</div>')
-
-    content_badge_style = ("background:#FF0076;color:#fff;" if is_short
-                           else "background:#1a73e8;color:#fff;")
-    content_label = "🩳 숏폼" if is_short else "🎬 롱폼"
-
+    short = row.get("_is_short", False)
+    ts = "width:100%;height:100%;object-fit:cover;display:block;" + ("aspect-ratio:9/16;" if short else "")
+    th = (f'<img src="{thumb}" alt="" style="{ts}">' if thumb
+          else '<div style="background:#1a1a1a;width:100%;height:155px;display:flex;'
+               'align-items:center;justify-content:center;font-size:36px;">🎬</div>')
+    cb = "background:#FF0076;color:#fff;" if short else "background:#1a73e8;color:#fff;"
+    cl = "🩳 숏폼" if short else "🎬 롱폼"
     st.markdown(f"""
 <div class="video-card" style="border-color:{g['border']};background:{g['bg']};box-shadow:{g['glow']}">
   <div class="card-inner">
     <div class="thumb-wrap">
-      {thumb_html}
+      {th}
       <span class="grade-badge" style="{g['badge']}">{g['icon']} {g['label']}</span>
-      <span class="dur-badge" style="{content_badge_style};position:absolute;bottom:8px;left:8px;
-        font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;
-        backdrop-filter:blur(4px);">{content_label}</span>
+      <span class="dur-badge" style="{cb};position:absolute;bottom:7px;left:7px;
+        font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;">{cl}</span>
       <span class="dur-badge">{row['재생시간']}</span>
     </div>
     <div class="card-info">
       <p class="v-title"><a href="{row['URL']}" target="_blank">{row['제목']}</a></p>
-      <div class="ch-row">
-        <span>📺</span>
-        <span style="font-size:13px;font-weight:700;color:{t['sub']}">{row['채널명']}</span>
-      </div>
+      <div class="ch-row">📺 {row['채널명']}</div>
       <div class="stats-row">
-        <div class="stat-item">
-          <span class="s-label">구독자</span>
-          <span class="s-val gold">👥 {fmt_num(row['구독자수'])}</span>
-        </div>
-        <div class="stat-item">
-          <span class="s-label">조회수</span>
-          <span class="s-val red">▶ {fmt_num(row['조회수'])}</span>
-        </div>
-        <div class="stat-item">
-          <span class="s-label">좋아요</span>
-          <span class="s-val">👍 {fmt_num(row['좋아요'])}</span>
-        </div>
-        <div class="stat-item">
-          <span class="s-label">댓글</span>
-          <span class="s-val">💬 {fmt_num(row['댓글수'])}</span>
-        </div>
-        <div class="stat-item">
-          <span class="s-label">업로드 후</span>
-          <span class="s-val">📅 {row['업로드경과일']}일</span>
-        </div>
+        <div class="stat-item"><span class="s-label">구독자</span><span class="s-val gold">👥 {fmt(row['구독자수'])}</span></div>
+        <div class="stat-item"><span class="s-label">조회수</span><span class="s-val red">▶ {fmt(row['조회수'])}</span></div>
+        <div class="stat-item"><span class="s-label">좋아요</span><span class="s-val">👍 {fmt(row['좋아요'])}</span></div>
+        <div class="stat-item"><span class="s-label">댓글</span><span class="s-val">💬 {fmt(row['댓글수'])}</span></div>
+        <div class="stat-item"><span class="s-label">업로드 후</span><span class="s-val">📅 {row['업로드경과일']}일</span></div>
       </div>
       <div class="tag-row">
         <span class="tag">📅 {row['업로드일']}</span>
@@ -681,743 +494,714 @@ def render_card(row: dict, t: dict):
 </div>""", unsafe_allow_html=True)
 
 
-def render_grade_summary(rows: list[dict], t: dict):
-    counts = {g: sum(1 for r in rows if r["등급"] == g) for g in "SABC"}
+def render_grade_summary(rows):
+    counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
     boxes = ""
     for g, cfg in GRADES.items():
-        boxes += f"""
-<div class="grade-box" style="border-color:{cfg['border']};background:{cfg['bg']};
-     box-shadow:{cfg['glow']};">
-  <div class="grade-count" style="color:{cfg['color']}">{cfg['icon']} {counts[g]}</div>
-  <div class="grade-label" style="color:{cfg['color']}">{cfg['label']}</div>
-  <div class="grade-desc" style="color:{t['sub']}">{cfg['desc']}</div>
-</div>"""
+        boxes += (f'<div class="grade-box" style="border-color:{cfg["border"]};'
+                  f'background:{cfg["bg"]};box-shadow:{cfg["glow"]};">'
+                  f'<div class="grade-count" style="color:{cfg["color"]}">{cfg["icon"]} {counts[g]}</div>'
+                  f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
+                  f'<div class="grade-desc">{cfg["desc"]}</div></div>')
     st.markdown(f'<div class="grade-summary">{boxes}</div>', unsafe_allow_html=True)
 
 
-# ── 검색 기록 탭 ──────────────────────────────────────────────────────────────
-def _render_history_tab(t: dict):
-    sessions = list_sessions()
+# ── 페이지: 로그인 ─────────────────────────────────────────────────────────────
+def page_login():
+    st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+    st.markdown("""
+<div class="login-wrap">
+  <div class="login-logo">
+    <h1>🔍 채널 <span>발굴기</span></h1>
+    <p>한국 여행 채널 분석 · 등급 분류 · 기록 관리</p>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    if not sessions:
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        if not auth.has_users():
+            st.info("처음 사용하시나요? 아래에서 계정을 만들어 시작하세요.", icon="👋")
+            tab_login, tab_reg = st.tabs(["🔑 로그인", "📝 회원가입"])
+        else:
+            tab_login, tab_reg = st.tabs(["🔑 로그인", "📝 회원가입"])
+
+        with tab_login:
+            with st.form("login_form"):
+                u = st.text_input("사용자명", placeholder="username")
+                p = st.text_input("비밀번호", type="password", placeholder="••••••••")
+                ok = st.form_submit_button("로그인", type="primary", use_container_width=True)
+            if ok:
+                if auth.verify(u, p):
+                    st.session_state.logged_in = True
+                    st.session_state.username = u
+                    st.rerun()
+                else:
+                    st.error("사용자명 또는 비밀번호가 틀렸습니다.")
+
+        with tab_reg:
+            with st.form("reg_form"):
+                nu = st.text_input("사용자명", placeholder="원하는 사용자명", key="reg_u")
+                np = st.text_input("비밀번호", type="password", placeholder="••••••••", key="reg_p")
+                np2 = st.text_input("비밀번호 확인", type="password", placeholder="••••••••", key="reg_p2")
+                ok2 = st.form_submit_button("계정 만들기", type="primary", use_container_width=True)
+            if ok2:
+                if np != np2:
+                    st.error("비밀번호가 일치하지 않습니다.")
+                else:
+                    ok3, msg = auth.register(nu, np)
+                    if ok3:
+                        st.success(msg + " 이제 로그인해 주세요.")
+                    else:
+                        st.error(msg)
+
+
+# ── 사이드바 내비 ──────────────────────────────────────────────────────────────
+def render_sidebar(username: str):
+    with st.sidebar:
+        # 로고
         st.markdown(
-            f"<div style='text-align:center;padding:80px 0;'>"
-            "<div style='font-size:56px'>📭</div>"
-            f"<div style='font-size:17px;margin-top:14px;color:{t['sub']};line-height:1.8'>"
-            "저장된 검색 기록이 없습니다.<br>"
-            f"검색 후 <b style='color:{t['text']}'>💾 검색 결과 저장</b> 버튼을 눌러보세요.</div>"
+            "<div style='padding:16px 14px 10px;'>"
+            "<div style='font-size:18px;font-weight:900;color:#f0f0f0;'>🔍 채널 <span style=color:#e53935>발굴기</span></div>"
+            "<div style='font-size:11px;color:#444;margin-top:2px;'>YouTube Channel Finder</div>"
             "</div>",
             unsafe_allow_html=True,
         )
-        return
+        st.markdown("<hr style='border-color:#1e1e1e;margin:0 0 6px'>", unsafe_allow_html=True)
 
-    st.markdown(
-        f"<p style='color:{t['sub']};font-size:14px;margin-bottom:16px;'>"
-        f"저장된 검색 기록 <b style='color:{t['text']}'>{len(sessions)}건</b></p>",
-        unsafe_allow_html=True,
-    )
+        page = st.session_state.get("page", "search")
 
-    grade_colors = {"S": "#FFD700", "A": "#00CFFF", "B": "#4CAF50", "C": "#888"}
-
-    for s in sessions:
-        sid = s["id"]
-        grade_badges = "".join([
-            f"<span class='hg-badge' style='background:{grade_colors[g]}20;"
-            f"color:{grade_colors[g]};border:1px solid {grade_colors[g]}40;'>"
-            f"{lbl} {s[f'grade_{g.lower()}']}</span>"
-            for g, lbl in [("S","🏆S"), ("A","⭐A"), ("B","🌱B"), ("C","📺C")]
-        ])
-
-        st.markdown(
-            f"""<div class="hist-card">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-    <div>
-      <div class="hist-name">{s['name']}</div>
-      <div class="hist-meta">📅 {s['saved_at']} &nbsp;|&nbsp; 🎬 총 {s['result_count']}개 영상 &nbsp;|&nbsp; ID: {sid}</div>
-      <div class="hist-grade-row">{grade_badges}</div>
-    </div>
-  </div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-
-        btn_col1, btn_col2, btn_col3, _, rename_col = st.columns([1.5, 1.5, 1, 0.5, 3])
-
-        with btn_col1:
-            if st.button("📂 불러오기", key=f"load_{sid}", use_container_width=True, type="primary"):
-                st.session_state.results = load_session(sid)
-                st.success(f"'{s['name']}' 불러왔습니다. 🔍 검색 탭에서 확인하세요.")
+        def nav(label: str, pg: str, icon: str):
+            is_act = page == pg
+            style = ("background:#1e1e1e;color:#fff;border-left:3px solid #e53935;"
+                     if is_act else "")
+            btn_style = f"<style>div[data-testid='stButton'] button[key='nav_{pg}']{{" + style + "}</style>"
+            if st.button(
+                f"{'▶ ' if is_act else '   '}{icon} {label}",
+                key=f"nav_{pg}",
+                use_container_width=True,
+            ):
+                st.session_state.page = pg
                 st.rerun()
 
-        with btn_col2:
-            if st.button("🗑️ 삭제", key=f"del_{sid}", use_container_width=True):
-                delete_session(sid)
-                st.rerun()
+        st.markdown("<div class='nav-section'>채널 발굴</div>", unsafe_allow_html=True)
+        nav("빠른 검색",      "search",     "🔎")
+        nav("나만의 키워드",  "custom_kw",  "📝")
+        nav("키워드 DB 검색", "db_search",  "🗂")
 
-        with btn_col3:
-            pass
+        st.markdown("<div class='nav-section'>기록 & 관리</div>", unsafe_allow_html=True)
+        nav("저장된 검색 기록", "history",  "📚")
 
-        with rename_col:
-            rc1, rc2 = st.columns([3, 1])
-            with rc1:
-                new_name = st.text_input("", key=f"rename_input_{sid}",
-                                         placeholder="이름 변경...",
-                                         label_visibility="collapsed")
-            with rc2:
-                if st.button("✏️", key=f"rename_{sid}", use_container_width=True,
-                             help="이름 변경"):
-                    if new_name.strip():
-                        rename_session(sid, new_name.strip())
-                        st.rerun()
+        st.markdown("<div class='nav-section'>계정</div>", unsafe_allow_html=True)
+        nav("마이페이지",   "mypage",  "👤")
+        nav("API 키 관리",  "apikeys", "🔑")
 
+        st.markdown("<hr style='border-color:#1e1e1e;margin:10px 0 6px'>", unsafe_allow_html=True)
+
+        # 로그아웃
+        if st.button("🚪 로그아웃", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.rerun()
+
+        # 하단 쿼타 미니 표시
+        q = get_today_quota()
+        used = q["units"]
+        pct = min(used / DAILY_QUOTA * 100, 100)
+        bar_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
         st.markdown(
-            f"<hr style='border:none;border-top:1px solid {t['divider']};margin:8px 0 16px;'>",
-            unsafe_allow_html=True,
-        )
-
-
-# ── 메인 앱 ───────────────────────────────────────────────────────────────────
-def main():
-    st.set_page_config(page_title="한국 여행 채널 발굴기", page_icon="🔍", layout="wide")
-
-    # 세션 초기화
-    if "theme" not in st.session_state:
-        st.session_state.theme = "dark"
-    if "results" not in st.session_state:
-        st.session_state.results = []
-    if "api_keys_raw" not in st.session_state:
-        st.session_state.api_keys_raw = ["", "", "", "", ""]
-    if "my_keywords" not in st.session_state:
-        st.session_state.my_keywords = []   # 나만의 키워드 목록
-
-    t = THEMES[st.session_state.theme]
-    st.markdown(build_css(t), unsafe_allow_html=True)
-
-    # ── 히어로 헤더 ──────────────────────────────────────────────────────────
-    is_dark = st.session_state.theme == "dark"
-    toggle_label = "☀️ 라이트" if is_dark else "🌙 다크"
-    col_hero, col_btn = st.columns([10, 1.5])
-    with col_hero:
-        st.markdown(
-            f"<div class='hero-header'>"
-            f"<div>"
-            f"<h1 class='hero-title'>🔍 한국 여행 채널 <span>발굴기</span></h1>"
-            f"<p class='hero-sub'>"
-            "전 세계 숨겨진 한국 여행 채널을 &nbsp;"
-            "<b style='color:#FFD700'>🏆S</b> &nbsp;"
-            "<b style='color:#00CFFF'>⭐A</b> &nbsp;"
-            "<b style='color:#4CAF50'>🌱B</b> &nbsp;"
-            "<b style='color:#888'>📺C</b> &nbsp;"
-            "등급으로 분류합니다</p>"
-            f"</div>"
+            f"<div style='padding:10px 14px;'>"
+            f"<div style='font-size:10px;color:#444;font-weight:700;text-transform:uppercase;"
+            f"letter-spacing:.8px;margin-bottom:4px;'>오늘 쿼타</div>"
+            f"<div style='font-size:12px;color:#888;font-weight:700;'>"
+            f"<b style='color:{bar_color}'>{used:,}</b> / {DAILY_QUOTA:,}</div>"
+            f"<div style='background:#1a1a1a;border-radius:4px;height:5px;margin-top:5px'>"
+            f"<div style='width:{pct:.1f}%;height:5px;border-radius:4px;"
+            f"background:{bar_color};transition:width .4s'></div></div>"
             f"</div>",
             unsafe_allow_html=True,
         )
-    with col_btn:
-        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-        if st.button(toggle_label, use_container_width=True):
-            st.session_state.theme = "light" if is_dark else "dark"
-            st.rerun()
 
-    # ── 메인 탭 ───────────────────────────────────────────────────────────────
-    main_tab, history_tab = st.tabs(["🔍 검색", "📚 저장된 검색 기록"])
 
-    with history_tab:
-        _render_history_tab(t)
+# ── 상단 바 ───────────────────────────────────────────────────────────────────
+def render_topbar(title: str, username: str):
+    q = get_today_quota()
+    used = q["units"]
+    remaining = DAILY_QUOTA - used
+    pct = min(used / DAILY_QUOTA * 100, 100)
+    chip_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
+    initials = username[:2].upper() if username else "?"
+    st.markdown(
+        f"<div class='topbar'>"
+        f"<div class='topbar-title'>{title}</div>"
+        f"<div class='topbar-right'>"
+        f"<div class='quota-chip'>쿼타 <b style='color:{chip_color}'>{used:,}</b> / {DAILY_QUOTA:,} "
+        f"<span style='color:#4CAF50'>(잔여 {remaining:,})</span></div>"
+        f"<div class='user-chip'>👤 {username}</div>"
+        f"</div></div>",
+        unsafe_allow_html=True,
+    )
 
-    # ── 사이드바 ──────────────────────────────────────────────────────────────
-    with st.sidebar:
-        # ── API 키 섹션 ──
-        st.markdown(
-            f"<div style='font-size:16px;font-weight:800;margin-bottom:10px;'>"
-            "🔑 YouTube API 키</div>"
-            f"<div style='font-size:11px;color:{t['sub']};margin-bottom:10px;line-height:1.5'>"
-            "최대 5개 키를 등록하면 쿼타 소진 시 자동으로 다음 키로 전환됩니다.</div>",
-            unsafe_allow_html=True,
+
+# ── 페이지: 검색 (공통 결과 표시) ─────────────────────────────────────────────
+def _run_search(youtube, keywords_to_search, dur_filter, sort, max_res,
+                pub_after, pages_arg, mode_label):
+    all_ids: dict[str, str] = {}
+    total = len(keywords_to_search)
+    prog = st.progress(0, text="검색 준비 중...")
+    status = st.empty()
+    fatal = None
+    key_idx = 0
+    keys = get_valid_keys()
+    kw_i = 0
+
+    while kw_i < len(keywords_to_search):
+        kw = keywords_to_search[kw_i]
+        status.markdown(
+            f"🔍 **{kw_i+1}/{total}** : `{kw}` | 수집 **{len(all_ids)}개**"
+            + (f" | 🔑 키#{key_idx+1}" if len(keys)>1 else "")
         )
-
-        env_key = os.getenv("YOUTUBE_API_KEY", "").strip()
         try:
-            secret_key = st.secrets.get("YOUTUBE_API_KEY", "").strip()
-        except Exception:
-            secret_key = ""
+            ids = search_ids(youtube, kw, dur_filter, sort, max_res, pub_after, pages_arg)
+            for vid in ids:
+                if vid not in all_ids: all_ids[vid] = kw
+            kw_i += 1
+        except HttpError as e:
+            info = _classify(str(e))
+            if info["type"] == "quota":
+                nc, ni = rotate(key_idx)
+                if nc:
+                    youtube = nc; key_idx = ni
+                    status.warning(f"🔄 키#{key_idx} 소진 → 키#{key_idx+1}로 전환", icon="⚡")
+                    time.sleep(0.3); continue
+                else:
+                    fatal = info; break
+            elif info["stop"]:
+                fatal = info; break
+            else:
+                kw_i += 1
+        except Exception as e:
+            status.empty(); prog.empty()
+            st.error(f"예상치 못한 오류: {e}"); st.stop()
 
-        # .env 또는 secrets에서 키가 있으면 첫 번째 슬롯에 미리 채움
-        prefill = env_key or secret_key
-        if prefill and not st.session_state.api_keys_raw[0]:
-            st.session_state.api_keys_raw[0] = prefill
+        prog.progress(min(kw_i/total,1.0), text=f"진행: {kw_i}/{total} | 수집: {len(all_ids)}개")
+        if total > 1: time.sleep(0.05)
 
-        new_keys = []
-        for i in range(5):
-            col_idx, col_input = st.columns([1, 8])
-            with col_idx:
-                st.markdown(
-                    f"<div style='text-align:center;font-size:12px;font-weight:700;"
-                    f"color:{t['sub']};padding-top:8px;'>#{i+1}</div>",
-                    unsafe_allow_html=True,
-                )
-            with col_input:
-                val = st.text_input(
-                    f"API Key {i+1}",
-                    value=st.session_state.api_keys_raw[i],
-                    type="password",
-                    placeholder="AIza...",
-                    label_visibility="collapsed",
-                    key=f"api_key_slot_{i}",
-                )
-            new_keys.append(val)
-        st.session_state.api_keys_raw = new_keys
+    status.empty(); prog.empty()
+    return all_ids, fatal, youtube
 
-        valid_keys = get_valid_keys()
-        if valid_keys:
-            st.markdown(
-                f"<div style='background:#4CAF5015;border:1px solid #4CAF5040;"
-                f"border-radius:8px;padding:8px 12px;margin:6px 0;'>"
-                f"<span class='key-status-ok'>✅ {len(valid_keys)}개 키 등록됨</span></div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f"<div style='background:#ff000015;border:1px solid #ff000040;"
-                f"border-radius:8px;padding:8px 12px;margin:6px 0;'>"
-                f"<span style='font-size:12px;color:#ff4444;font-weight:700;'>"
-                f"⚠️ API 키를 입력해 주세요</span>"
-                f"<br><a href='https://console.cloud.google.com/' target='_blank' "
-                f"style='font-size:11px;color:#888;'>🔗 키 발급받기</a></div>",
-                unsafe_allow_html=True,
-            )
 
-        st.markdown("<hr style='border-color:" + t['divider'] + ";margin:12px 0'>",
-                    unsafe_allow_html=True)
+def page_search(mode: str):
+    username = st.session_state.get("username","")
+    render_topbar("🔎 채널 발굴 검색", username)
 
-        # ── 검색 모드 ──
+    pub_map = {"7일 이내":7,"30일 이내":30,"90일 이내":90,"1년 이내":365}
+
+    # ── 사이드바 검색 옵션 ──
+    with st.sidebar:
+        st.markdown("<hr style='border-color:#1e1e1e;margin:4px 0 10px'>", unsafe_allow_html=True)
         st.markdown(
-            f"<div style='font-size:14px;font-weight:800;margin-bottom:8px;'>"
-            "🎯 검색 모드</div>",
+            "<div style='font-size:12px;font-weight:800;color:#666;"
+            "text-transform:uppercase;letter-spacing:.8px;padding:0 14px 6px;'>검색 설정</div>",
             unsafe_allow_html=True,
         )
-        mode = st.radio(
-            "검색 모드",
-            ["🔎 빠른 검색", "📝 나만의 키워드", "🗂 키워드 DB 검색"],
-            label_visibility="collapsed",
-            help="빠른 검색: 단일 키워드 | 나만의 키워드: 원하는 키워드를 직접 추가 | DB 검색: 대량 검색",
-        )
 
-        st.markdown("<hr style='border-color:" + t['divider'] + ";margin:12px 0'>",
-                    unsafe_allow_html=True)
-
-        pub_map = {"7일 이내": 7, "30일 이내": 30, "90일 이내": 90, "1년 이내": 365}
-
-        if mode == "🔎 빠른 검색":
-            st.markdown(
-                f"<div style='font-size:14px;font-weight:800;margin-bottom:8px;'>🔍 검색 설정</div>",
-                unsafe_allow_html=True,
-            )
-            keyword_input = st.text_input("검색어", placeholder="예: korea hiking vlog")
-            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
-            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()))
-            pages_qs = st.slider("페이지 수 (페이지당 50개)", 1, 4, 2,
-                                  help="2페이지 = 최대 100개, 4페이지 = 최대 200개")
-            max_results = pages_qs * 50
-            published_days = st.selectbox("업로드 기간",
-                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"])
+        if mode == "search":
+            kw_input = st.text_input("검색어", placeholder="korea hiking vlog", key="sq_kw")
+            dur_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()), key="sq_dur")
+            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()), key="sq_sort")
+            pages = st.slider("페이지 수", 1, 4, 2, key="sq_pg",
+                              help="1페이지=50개, 4페이지=200개")
+            max_results = pages * 50
+            pages_arg = pages
+            pub_days = st.selectbox("업로드 기간",
+                ["전체","7일 이내","30일 이내","90일 이내","1년 이내"], key="sq_pub")
             pub_after = None
-            if published_days in pub_map:
-                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+            if pub_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[pub_days])
                 pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-            pages_arg = pages_qs
-            search_clicked = st.button("🔍 검색 시작", type="primary", use_container_width=True)
+            search_clicked = st.button("🔍 검색 시작", type="primary",
+                                       use_container_width=True, key="sq_btn")
+            keywords_to_search = [kw_input.strip()] if kw_input.strip() else []
 
-        elif mode == "📝 나만의 키워드":
-            st.markdown(
-                f"<div style='font-size:14px;font-weight:800;margin-bottom:4px;'>📝 나만의 키워드 목록</div>"
-                f"<div style='font-size:11px;color:{t['sub']};margin-bottom:10px;'>키워드를 입력하고 추가 버튼을 누르세요. 각 키워드별로 따로 검색합니다.</div>",
-                unsafe_allow_html=True,
-            )
-
-            # ── 키워드 입력 ──
-            kw_col, add_col = st.columns([5, 2])
-            with kw_col:
-                new_kw = st.text_input(
-                    "키워드 입력",
-                    placeholder="예: vlog in korea",
-                    label_visibility="collapsed",
-                    key="my_kw_input",
-                )
-            with add_col:
-                add_clicked = st.button("➕ 추가", use_container_width=True, key="my_kw_add")
-
-            if add_clicked and new_kw.strip():
-                kw_clean = new_kw.strip()
-                if kw_clean not in st.session_state.my_keywords:
-                    st.session_state.my_keywords.append(kw_clean)
-                st.rerun()
-
-            # ── 키워드 목록 표시 ──
-            my_kws = st.session_state.my_keywords
-            if my_kws:
-                st.markdown(
-                    f"<div style='font-size:12px;color:{t['sub']};margin-bottom:6px;'>"
-                    f"등록된 키워드 <b style='color:{t['text']}'>{len(my_kws)}개</b></div>",
-                    unsafe_allow_html=True,
-                )
-                for idx_k, kw_item in enumerate(my_kws):
-                    kc1, kc2 = st.columns([7, 1])
-                    with kc1:
-                        st.markdown(
-                            f"<div style='background:{t['card_bg']};border:1px solid {t['divider']};"
-                            f"border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;"
-                            f"color:{t['text']};margin-bottom:4px;overflow:hidden;"
-                            f"text-overflow:ellipsis;white-space:nowrap;' title='{kw_item}'>"
-                            f"🔖 {kw_item}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    with kc2:
-                        if st.button("✕", key=f"del_kw_{idx_k}", use_container_width=True,
-                                     help=f"'{kw_item}' 삭제"):
-                            st.session_state.my_keywords.pop(idx_k)
-                            st.rerun()
-
-                if st.button("🗑 전체 삭제", use_container_width=True, key="clear_all_kws"):
-                    st.session_state.my_keywords = []
+        elif mode == "custom_kw":
+            st.markdown("<div style='padding:0 4px;'>", unsafe_allow_html=True)
+            c1, c2 = st.columns([5,2])
+            with c1:
+                new_kw = st.text_input("키워드", placeholder="vlog in korea",
+                                       label_visibility="collapsed", key="ck_input")
+            with c2:
+                if st.button("➕ 추가", use_container_width=True, key="ck_add"):
+                    kw_c = new_kw.strip()
+                    if kw_c and kw_c not in st.session_state.my_keywords:
+                        st.session_state.my_keywords.append(kw_c)
                     st.rerun()
-            else:
-                st.markdown(
-                    f"<div style='text-align:center;padding:20px 0;color:{t['sub']};font-size:13px;'>"
-                    "키워드를 추가해 보세요</div>",
-                    unsafe_allow_html=True,
-                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()),
-                                           key="my_dur")
-            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()), key="my_sort")
-            pages_mk = st.slider("키워드당 페이지 수", 1, 4, 1,
-                                  help="1페이지=50개, 4페이지=200개/키워드",
-                                  key="my_pages")
-            max_results = pages_mk * 50
-            pages_arg = pages_mk
+            my_kws = st.session_state.my_keywords
+            for i, kw_item in enumerate(my_kws):
+                r1, r2 = st.columns([8,1])
+                with r1:
+                    st.markdown(
+                        f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;"
+                        f"border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600;"
+                        f"color:#ddd;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;"
+                        f"white-space:nowrap;' title='{kw_item}'>🔖 {kw_item}</div>",
+                        unsafe_allow_html=True)
+                with r2:
+                    if st.button("✕", key=f"ck_del_{i}", use_container_width=True):
+                        st.session_state.my_keywords.pop(i); st.rerun()
 
-            published_days = st.selectbox("업로드 기간",
-                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"], key="my_pub")
+            if my_kws and st.button("🗑 전체 삭제", use_container_width=True, key="ck_clr"):
+                st.session_state.my_keywords = []; st.rerun()
+
+            dur_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()), key="ck_dur")
+            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()), key="ck_sort")
+            pages = st.slider("키워드당 페이지", 1, 4, 1, key="ck_pg")
+            max_results = pages * 50
+            pages_arg = pages
+            pub_days = st.selectbox("업로드 기간",
+                ["전체","7일 이내","30일 이내","90일 이내","1년 이내"], key="ck_pub")
             pub_after = None
-            if published_days in pub_map:
-                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+            if pub_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[pub_days])
                 pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            kw_count_my = len(my_kws)
-            if kw_count_my:
-                est_my = kw_count_my * max_results
+            keywords_to_search = list(st.session_state.my_keywords)
+            if keywords_to_search:
+                est = len(keywords_to_search) * max_results
                 st.markdown(
-                    f"<div style='background:{t['card_bg']};border:1px solid {t['divider']};"
-                    f"border-radius:8px;padding:8px 12px;font-size:12px;color:{t['sub']};margin:6px 0'>"
-                    f"🔍 <b style='color:{t['text']}'>{kw_count_my}개</b> 키워드 × "
-                    f"<b style='color:{t['text']}'>{pages_mk}페이지</b> = 최대 "
-                    f"<b style='color:#ff0000'>~{est_my}개</b> 결과</div>",
-                    unsafe_allow_html=True,
-                )
+                    f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;"
+                    f"padding:8px 12px;font-size:12px;color:#888;margin:4px 0'>"
+                    f"🔍 <b style='color:#f0f0f0'>{len(keywords_to_search)}</b>개 키워드 → "
+                    f"최대 <b style='color:#e53935'>~{est}</b>개</div>",
+                    unsafe_allow_html=True)
+            search_clicked = st.button("🚀 검색 시작", type="primary",
+                                       use_container_width=True, key="ck_btn",
+                                       disabled=(len(keywords_to_search)==0))
 
-            search_clicked = st.button(
-                "🚀 내 키워드로 검색",
-                type="primary",
-                use_container_width=True,
-                disabled=(kw_count_my == 0),
-                key="my_kw_search",
-            )
-            keyword_input = ""
-            selected_kws = []
-
-        else:
-            st.markdown(
-                f"<div style='font-size:14px;font-weight:800;margin-bottom:8px;'>🗂 키워드 DB 설정</div>",
-                unsafe_allow_html=True,
-            )
-
+        else:  # db_search
             all_langs = get_all_languages()
-            preset_500 = st.button(
-                "⚡ 500+ 결과 자동 설정",
-                use_container_width=True,
-                help="10개 키워드 × 1페이지 = 약 500개 결과 (쿼타 1,000 소비)",
-            )
-            if preset_500:
-                st.session_state["db_langs"] = ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文"]
-                st.session_state["db_cats"] = ["가족여행", "특수여행유형", "K-Food"]
-                st.session_state["db_pages"] = 1
-                st.rerun()
+            if st.button("⚡ 500+ 자동 설정", use_container_width=True, key="db_preset"):
+                st.session_state["db_langs"] = ["🇺🇸 English","🇯🇵 日本語","🇨🇳 中文"]
+                st.session_state["db_cats"] = ["가족여행","특수여행유형","K-Food"]
+                st.session_state["db_pages"] = 1; st.rerun()
 
-            default_langs = st.session_state.get("db_langs",
-                                                  ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文"])
-            default_cats = st.session_state.get("db_cats", ["가족여행", "특수여행유형"])
-
-            sel_langs = st.multiselect("🌐 언어 선택", all_langs,
-                                       default=default_langs,
-                                       placeholder="언어를 선택하세요")
-            all_cats = get_all_categories()
-            sel_cats = st.multiselect("📂 카테고리 선택", all_cats,
-                                      default=default_cats,
-                                      placeholder="카테고리를 선택하세요")
-
+            sel_langs = st.multiselect("언어", all_langs,
+                default=st.session_state.get("db_langs",["🇺🇸 English","🇯🇵 日本語","🇨🇳 中文"]),
+                key="db_langs_sel")
+            sel_cats = st.multiselect("카테고리", get_all_categories(),
+                default=st.session_state.get("db_cats",["가족여행","특수여행유형"]),
+                key="db_cats_sel")
             selected_kws = filter_keywords(sel_langs or None, sel_cats or None)
             kw_count = len(selected_kws)
 
-            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
-            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()))
+            dur_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()), key="db_dur")
+            sort_by    = st.selectbox("정렬", list(SORT_OPTIONS.keys()), key="db_sort")
+            pages_per_kw = st.slider("키워드당 페이지", 1, 2,
+                st.session_state.get("db_pages",1), key="db_pg")
+            max_results = pages_per_kw * 50; pages_arg = pages_per_kw
 
-            pages_per_kw = st.slider(
-                "키워드당 페이지 수", 1, 2,
-                st.session_state.get("db_pages", 1),
-                help="페이지당 50개. 1페이지 권장 (쿼타 절약)",
-            )
-            max_results = pages_per_kw * 50
-            pages_arg = pages_per_kw
+            DAILY_QUOTA_LOCAL = 10_000
+            est_quota = kw_count * pages_per_kw * 100 + (kw_count * max_results // 50)
+            safe_limit = max(1, int(8_000 / (pages_per_kw * 100)))
+            actual_kws = min(kw_count, safe_limit)
+            pct = est_quota / DAILY_QUOTA_LOCAL * 100
+            color = "#4CAF50" if pct<=50 else "#FFD700" if pct<=80 else "#e53935"
+            st.markdown(
+                f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;"
+                f"padding:8px 12px;font-size:12px;color:#888;margin:4px 0'>"
+                f"키워드 <b style='color:#f0f0f0'>{actual_kws}</b>개 | 쿼타 "
+                f"<b style='color:{color}'>{est_quota:,}</b> ({pct:.0f}%) | "
+                f"예상 결과 <b style='color:#e53935'>~{actual_kws*max_results:,}</b>개</div>",
+                unsafe_allow_html=True)
 
-            DAILY_QUOTA = 10_000
-            search_quota = kw_count * pages_per_kw * 100
-            detail_quota = (kw_count * max_results // 50) + kw_count
-            total_quota = search_quota + detail_quota
-            quota_pct = total_quota / DAILY_QUOTA * 100
-            safe_kw_limit = max(1, int((DAILY_QUOTA * 0.8) / (pages_per_kw * 100)))
-            actual_kws = min(kw_count, safe_kw_limit)
-            est = actual_kws * max_results
-
-            if quota_pct <= 50:
-                st.success(
-                    f"예상 쿼타: **{total_quota:,} / {DAILY_QUOTA:,}** ({quota_pct:.0f}%) ✅  "
-                    f"| 키워드 **{actual_kws}개** → 최대 **~{est:,}개**",
-                    icon="📊",
-                )
-            elif quota_pct <= 85:
-                st.warning(
-                    f"⚠️ 예상 쿼타: **{total_quota:,}** ({quota_pct:.0f}%)  "
-                    f"| 실제 **{actual_kws}개** 키워드로 제한됩니다.",
-                    icon="⚠️",
-                )
-            else:
-                st.error(
-                    f"🚫 쿼타 초과 위험 ({quota_pct:.0f}%)! 자동으로 **{actual_kws}개** 키워드만 검색합니다."
-                )
-
-            published_days = st.selectbox("업로드 기간",
-                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"])
+            pub_days = st.selectbox("업로드 기간",
+                ["전체","7일 이내","30일 이내","90일 이내","1년 이내"], key="db_pub")
             pub_after = None
-            if published_days in pub_map:
-                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+            if pub_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[pub_days])
                 pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            keywords_to_search = selected_kws[:safe_limit]
+            search_clicked = st.button("🚀 대량 검색 시작", type="primary",
+                                       use_container_width=True, key="db_btn",
+                                       disabled=(kw_count==0))
 
-            search_clicked = st.button(
-                "🚀 대량 검색 시작", type="primary",
-                use_container_width=True,
-                disabled=(kw_count == 0),
-            )
-            keyword_input = ""
+        st.markdown("<hr style='border-color:#1e1e1e;margin:8px 0'>", unsafe_allow_html=True)
+        content_type = st.radio("콘텐츠", ["전체","🎬 롱폼만","🩳 숏폼만"],
+                                horizontal=True, label_visibility="collapsed", key="ct_radio")
+        min_v = st.number_input("최소 조회수", 0, value=0, step=1000, key="min_v")
+        max_v = st.number_input("최대 조회수", 0, value=0, step=1000, key="max_v")
 
-        st.markdown("<hr style='border-color:" + t['divider'] + ";margin:12px 0'>",
-                    unsafe_allow_html=True)
-
-        st.markdown(
-            f"<div style='font-size:14px;font-weight:800;margin-bottom:8px;'>🎬 콘텐츠 유형</div>",
-            unsafe_allow_html=True,
-        )
-        content_type = st.radio(
-            "콘텐츠 유형",
-            ["전체", "🎬 롱폼만", "🩳 숏폼만"],
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-
-        st.markdown("<hr style='border-color:" + t['divider'] + ";margin:12px 0'>",
-                    unsafe_allow_html=True)
-
-        st.markdown(
-            f"<div style='font-size:14px;font-weight:800;margin-bottom:8px;'>📊 조회수 필터</div>",
-            unsafe_allow_html=True,
-        )
-        min_views = st.number_input("최소 조회수", min_value=0, value=0, step=1000)
-        max_views = st.number_input("최대 조회수", min_value=0, value=0, step=1000)
-
-    # ── 검색 실행 ─────────────────────────────────────────────────────────────
+    # ── 검색 실행 ──
     if search_clicked:
         valid_keys = get_valid_keys()
         if not valid_keys:
-            st.error("사이드바에 YouTube API 키를 1개 이상 입력해 주세요.")
+            st.error("🔑 API 키를 먼저 등록해 주세요. (사이드바 → API 키 관리)")
             st.stop()
+        if not keywords_to_search:
+            st.warning("검색어를 입력해 주세요."); st.stop()
 
-        key_idx = 0
-        youtube = get_client(valid_keys[key_idx])
+        youtube = make_client(valid_keys[0])
         if not youtube:
-            st.error("API 키가 유효하지 않습니다.")
-            st.stop()
+            st.error("API 키가 유효하지 않습니다."); st.stop()
 
-        if mode == "🔎 빠른 검색":
-            if not keyword_input.strip():
-                st.warning("검색어를 입력해 주세요.")
-                st.stop()
-            keywords_to_search = [keyword_input.strip()]
-        elif mode == "📝 나만의 키워드":
-            if not st.session_state.my_keywords:
-                st.warning("사이드바에 키워드를 1개 이상 추가해 주세요.")
-                st.stop()
-            keywords_to_search = list(st.session_state.my_keywords)
-        else:
-            if not selected_kws:
-                st.warning("언어 또는 카테고리를 선택해 주세요.")
-                st.stop()
-            safe_limit = max(1, int(8_000 / (pages_arg * 100)))
-            keywords_to_search = selected_kws[:safe_limit]
-            if len(selected_kws) > safe_limit:
-                st.info(
-                    f"쿼타 보호: {len(selected_kws)}개 키워드 중 **{safe_limit}개**만 검색합니다.",
-                    icon="🛡️",
-                )
+        all_ids, fatal, youtube = _run_search(
+            youtube, keywords_to_search, dur_filter, sort_by,
+            max_results, pub_after, pages_arg, mode)
 
-        all_ids: dict[str, str] = {}
-        total = len(keywords_to_search)
-        progress_bar = st.progress(0, text="검색 준비 중...")
-        status_box = st.empty()
-        fatal_error = None
+        if fatal:
+            if not all_ids: st.error(fatal["msg"]); st.stop()
+            else: st.warning(fatal["msg"])
 
-        kw_i = 0
-        while kw_i < len(keywords_to_search):
-            kw = keywords_to_search[kw_i]
-            status_box.markdown(
-                f"🔍 **{kw_i+1}/{total}** 검색 중: `{kw}` "
-                f"| 수집된 영상: **{len(all_ids)}개**"
-                + (f" | 🔑 키 #{key_idx+1} 사용 중" if len(valid_keys) > 1 else "")
-            )
-            try:
-                ids = search_ids(youtube, kw, duration_filter, sort_by,
-                                 max_results, pub_after, max_pages=pages_arg)
-                for vid in ids:
-                    if vid not in all_ids:
-                        all_ids[vid] = kw
-                kw_i += 1
-            except HttpError as e:
-                err_info = _classify_api_error(str(e))
-                if err_info["type"] == "quota":
-                    # 다음 키로 전환 시도
-                    next_client, next_idx = rotate_to_next_key(key_idx)
-                    if next_client:
-                        youtube = next_client
-                        key_idx = next_idx
-                        status_box.warning(
-                            f"🔄 키 #{key_idx}의 쿼타 소진 → 키 #{key_idx+1}로 전환합니다.",
-                            icon="⚡",
-                        )
-                        time.sleep(0.5)
-                        # 같은 키워드를 다시 시도 (kw_i 증가 없음)
-                        continue
-                    else:
-                        fatal_error = err_info
-                        break  # 모든 키 소진
-                elif err_info["stop"]:
-                    fatal_error = err_info
-                    break
-                else:
-                    kw_i += 1  # 일시 오류는 건너뜀
-            except Exception as e:
-                status_box.empty()
-                progress_bar.empty()
-                st.error(f"예상치 못한 오류: {e}")
-                st.stop()
-
-            progress_bar.progress(
-                min(kw_i / total, 1.0),
-                text=f"진행: {kw_i}/{total} | 수집: {len(all_ids)}개",
-            )
-            if total > 1:
-                time.sleep(0.05)
-
-        status_box.empty()
-        progress_bar.empty()
-
-        if fatal_error:
-            if len(all_ids) == 0:
-                st.error(fatal_error["msg"])
-                st.stop()
-            else:
-                st.warning(fatal_error["msg"] +
-                           f"\n\n지금까지 수집된 **{len(all_ids)}개**의 결과를 표시합니다.")
-
-        if len(all_ids) == 0:
-            st.warning("검색 결과가 없습니다. 다른 키워드나 필터를 시도해 보세요.")
-            st.stop()
+        if not all_ids:
+            st.warning("검색 결과가 없습니다."); st.stop()
 
         with st.spinner(f"📥 {len(all_ids)}개 영상 상세정보 수집 중..."):
             try:
                 rows = fetch_details(youtube, list(all_ids.keys()))
-                # 각 결과에 검색 키워드 태깅
-                for row in rows:
-                    vid_url = row["URL"]
-                    vid_id = vid_url.split("v=")[-1] if "v=" in vid_url else vid_url.split("/")[-1]
-                    row["_search_kw"] = all_ids.get(vid_id, "")
+                for r in rows:
+                    r["_search_kw"] = all_ids.get(
+                        r["URL"].split("v=")[-1] if "v=" in r["URL"] else r["URL"].split("/")[-1], "")
             except HttpError as e:
-                err = _classify_api_error(str(e))
-                st.error(err["msg"])
-                st.stop()
+                st.error(_classify(str(e))["msg"]); st.stop()
             except Exception as e:
-                st.error(f"상세정보 수집 오류: {e}")
-                st.stop()
+                st.error(f"상세정보 수집 오류: {e}"); st.stop()
 
-        if content_type == "🎬 롱폼만":
-            rows = [r for r in rows if not r["_is_short"]]
-        elif content_type == "🩳 숏폼만":
-            rows = [r for r in rows if r["_is_short"]]
+        if content_type == "🎬 롱폼만": rows = [r for r in rows if not r["_is_short"]]
+        elif content_type == "🩳 숏폼만": rows = [r for r in rows if r["_is_short"]]
+        if min_v > 0: rows = [r for r in rows if r["조회수"] >= min_v]
+        if max_v > 0: rows = [r for r in rows if r["조회수"] <= max_v]
 
-        if min_views > 0:
-            rows = [r for r in rows if r["조회수"] >= min_views]
-        if max_views > 0:
-            rows = [r for r in rows if r["조회수"] <= max_views]
-
-        grade_order = {"S": 0, "A": 1, "B": 2, "C": 3}
-        rows.sort(key=lambda r: (grade_order[r["등급"]], r["업로드경과일"]))
-
+        go = {"S":0,"A":1,"B":2,"C":3}
+        rows.sort(key=lambda r: (go[r["등급"]], r["업로드경과일"]))
         st.session_state.results = rows
-        st.session_state["last_kw_stats"] = {}
-        if mode in ("📝 나만의 키워드", "🔎 빠른 검색"):
-            # 키워드별 결과 수 계산
-            kw_stat: dict[str, int] = {}
-            for row in rows:
-                kw_stat[row.get("_search_kw", "기타")] = kw_stat.get(row.get("_search_kw", "기타"), 0) + 1
-            st.session_state["last_kw_stats"] = kw_stat
 
-    # ── 결과 표시 ─────────────────────────────────────────────────────────────
-    with main_tab:
-        rows = st.session_state.results
+        kw_stat: dict[str,int] = {}
+        for r in rows:
+            k = r.get("_search_kw","기타")
+            kw_stat[k] = kw_stat.get(k,0) + 1
+        st.session_state["last_kw_stats"] = kw_stat
 
-        if not rows:
+    # ── 결과 표시 ──
+    rows = st.session_state.get("results", [])
+
+    if not rows:
+        st.markdown(
+            "<div style='text-align:center;padding:70px 0;'>"
+            "<div style='font-size:56px'>🔍</div>"
+            "<div style='font-size:16px;color:#555;margin-top:14px;line-height:1.8;'>"
+            "사이드바에서 검색 설정 후<br>"
+            "<b style='color:#e53935'>검색 시작</b> 버튼을 클릭하세요</div>"
+            "<div style='display:flex;justify-content:center;gap:12px;margin-top:24px;flex-wrap:wrap;'>",
+            unsafe_allow_html=True)
+        for g_key, cfg in GRADES.items():
             st.markdown(
-                f"<div style='text-align:center;padding:80px 0;'>"
-                "<div style='font-size:60px'>🔍</div>"
-                f"<div style='font-size:18px;margin-top:16px;color:{t['sub']};line-height:1.8'>"
-                "사이드바에서 API 키를 입력하고<br>"
-                f"검색어 또는 키워드 DB를 선택한 후 "
-                f"<b style='color:#ff0000'>검색 시작</b> 버튼을 클릭하세요</div>"
-                f"<div style='display:flex;justify-content:center;gap:16px;margin-top:28px;"
-                f"flex-wrap:wrap;'>"
-                f"<div style='background:{GRADES['S']['bg']};border:1px solid {GRADES['S']['border']};"
-                f"border-radius:12px;padding:12px 20px;text-align:center;min-width:120px;'>"
-                f"<div style='font-size:22px;font-weight:900;color:{GRADES['S']['color']}'>"
-                f"🏆 S급</div>"
-                f"<div style='font-size:10px;color:{t['sub']};margin-top:4px'>{GRADES['S']['desc']}</div></div>"
-                f"<div style='background:{GRADES['A']['bg']};border:1px solid {GRADES['A']['border']};"
-                f"border-radius:12px;padding:12px 20px;text-align:center;min-width:120px;'>"
-                f"<div style='font-size:22px;font-weight:900;color:{GRADES['A']['color']}'>"
-                f"⭐ A급</div>"
-                f"<div style='font-size:10px;color:{t['sub']};margin-top:4px'>{GRADES['A']['desc']}</div></div>"
-                f"<div style='background:{GRADES['B']['bg']};border:1px solid {GRADES['B']['border']};"
-                f"border-radius:12px;padding:12px 20px;text-align:center;min-width:120px;'>"
-                f"<div style='font-size:22px;font-weight:900;color:{GRADES['B']['color']}'>"
-                f"🌱 B급</div>"
-                f"<div style='font-size:10px;color:{t['sub']};margin-top:4px'>{GRADES['B']['desc']}</div></div>"
-                f"<div style='background:{GRADES['C']['bg']};border:1px solid {GRADES['C']['border']};"
-                f"border-radius:12px;padding:12px 20px;text-align:center;min-width:120px;'>"
-                f"<div style='font-size:22px;font-weight:900;color:{GRADES['C']['color']}'>"
-                f"📺 C급</div>"
-                f"<div style='font-size:10px;color:{t['sub']};margin-top:4px'>{GRADES['C']['desc']}</div></div>"
-                f"</div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
+                f"<div style='background:{cfg['bg']};border:1px solid {cfg['border']};"
+                f"border-radius:12px;padding:12px 18px;min-width:130px;text-align:center;'>"
+                f"<div style='font-size:20px;font-weight:900;color:{cfg['color']}'>{cfg['icon']} {cfg['label']}</div>"
+                f"<div style='font-size:10px;color:#555;margin-top:3px'>{cfg['desc']}</div></div>",
+                unsafe_allow_html=True)
+        st.markdown("</div></div>", unsafe_allow_html=True)
+        return
+
+    render_grade_summary(rows)
+
+    # 키워드별 결과 수
+    kw_stats = st.session_state.get("last_kw_stats", {})
+    if len(kw_stats) > 1:
+        badges = "".join([
+            f"<span style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:18px;"
+            f"padding:4px 12px;font-size:12px;font-weight:700;color:#aaa;'>"
+            f"🔖 {kw} <b style='color:#e53935'>{cnt}</b></span>"
+            for kw, cnt in kw_stats.items()
+        ])
+        st.markdown(f"<div style='display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px;'>{badges}</div>",
+                    unsafe_allow_html=True)
+
+    # 저장 행
+    sv1, sv2 = st.columns([3, 7])
+    with sv1:
+        sname = st.text_input("저장 이름", placeholder="예: 영어 가족여행",
+                              label_visibility="collapsed", key="sv_name")
+        if st.button("💾 결과 저장", type="primary", use_container_width=True):
+            if not sname.strip(): st.warning("저장 이름을 입력해 주세요.")
+            else:
+                sid = save_session(sname.strip(), rows)
+                st.success(f"✅ '{sname}' 저장 완료! — 📚 기록 탭 확인")
+    with sv2:
+        st.markdown(
+            f"<div style='background:#161616;border:1px solid #222;border-radius:10px;"
+            f"padding:8px 14px;font-size:13px;color:#888;'>"
+            f"총 <b style='color:#f0f0f0'>{len(rows)}</b>개 영상 | 등급순 정렬 | "
+            f"이름 입력 후 💾 저장하면 📚 기록 탭에서 언제든 다시 확인</div>",
+            unsafe_allow_html=True)
+
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    grade_filter = st.radio("등급", ["전체","🏆 S급","⭐ A급","🌱 B급","📺 C급"],
+                            horizontal=True, label_visibility="collapsed", key="gf")
+    gmap = {"전체":None,"🏆 S급":"S","⭐ A급":"A","🌱 B급":"B","📺 C급":"C"}
+    filtered = [r for r in rows if gmap[grade_filter] is None or r["등급"]==gmap[grade_filter]]
+    st.markdown(f"<p style='color:#555;font-size:12px;margin:3px 0 10px'>표시: <b style='color:#f0f0f0'>{len(filtered)}개</b></p>",
+                unsafe_allow_html=True)
+
+    t_card, t_table = st.tabs(["🎬 카드 보기","📋 테이블 보기"])
+    with t_card:
+        for r in filtered: render_card(r)
+    with t_table:
+        df = pd.DataFrame(filtered).drop(columns=["썸네일","_channel_id","_is_short","_search_kw"], errors="ignore")
+        st.dataframe(df, use_container_width=True, hide_index=True,
+                     column_config={"URL":st.column_config.LinkColumn("URL"),
+                                    "조회수":st.column_config.NumberColumn(format="%d"),
+                                    "좋아요":st.column_config.NumberColumn(format="%d"),
+                                    "댓글수":st.column_config.NumberColumn(format="%d"),
+                                    "구독자수":st.column_config.NumberColumn(format="%d")})
+        csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        st.download_button("📥 CSV 다운로드", csv, "채널발굴결과.csv", "text/csv", use_container_width=True)
+
+
+# ── 페이지: 검색 기록 ──────────────────────────────────────────────────────────
+def page_history():
+    username = st.session_state.get("username","")
+    render_topbar("📚 저장된 검색 기록", username)
+
+    sessions = list_sessions()
+    if not sessions:
+        st.markdown(
+            "<div style='text-align:center;padding:70px 0;'>"
+            "<div style='font-size:52px'>📭</div>"
+            "<div style='font-size:16px;color:#555;margin-top:12px;'>"
+            "저장된 기록이 없습니다.<br>검색 후 💾 결과 저장 버튼을 눌러보세요.</div>"
+            "</div>", unsafe_allow_html=True)
+        return
+
+    st.markdown(f"<p style='color:#555;font-size:13px;margin-bottom:16px;'>총 <b style='color:#f0f0f0'>{len(sessions)}건</b></p>",
+                unsafe_allow_html=True)
+    gc = {"S":"#FFD700","A":"#00CFFF","B":"#4CAF50","C":"#888"}
+
+    for s in sessions:
+        sid = s["id"]
+        badges = "".join([
+            f"<span style='background:{gc[g]}18;color:{gc[g]};border:1px solid {gc[g]}35;"
+            f"border-radius:14px;padding:2px 10px;font-size:11px;font-weight:700;'>"
+            f"{lb} {s[f'grade_{g.lower()}']}</span>"
+            for g, lb in [("S","🏆S"),("A","⭐A"),("B","🌱B"),("C","📺C")]
+        ])
+        st.markdown(
+            f"<div class='hist-card'>"
+            f"<div class='hist-name'>{s['name']}</div>"
+            f"<div class='hist-meta'>📅 {s['saved_at']} &nbsp;|&nbsp; 🎬 {s['result_count']}개 &nbsp;|&nbsp; ID: {sid}</div>"
+            f"<div style='display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;'>{badges}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+        bc1, bc2, _, rn1, rn2 = st.columns([1.5, 1.2, 0.5, 3, 1])
+        with bc1:
+            if st.button("📂 불러오기", key=f"ld_{sid}", use_container_width=True, type="primary"):
+                st.session_state.results = load_session(sid)
+                st.session_state.page = "search"; st.rerun()
+        with bc2:
+            if st.button("🗑 삭제", key=f"dl_{sid}", use_container_width=True):
+                delete_session(sid); st.rerun()
+        with rn1:
+            new_n = st.text_input("", key=f"rn_{sid}", placeholder="이름 변경...",
+                                  label_visibility="collapsed")
+        with rn2:
+            if st.button("✏️", key=f"rnb_{sid}", use_container_width=True):
+                if new_n.strip(): rename_session(sid, new_n.strip()); st.rerun()
+
+        st.markdown("<hr style='border-color:#1e1e1e;margin:6px 0 12px'>", unsafe_allow_html=True)
+
+
+# ── 페이지: 마이페이지 ─────────────────────────────────────────────────────────
+def page_mypage():
+    username = st.session_state.get("username","")
+    render_topbar("👤 마이페이지", username)
+
+    stats = get_total_stats()
+    q_today = get_today_quota()
+    q_hist = get_quota_history(7)
+    used_today = q_today["units"]
+    remain = DAILY_QUOTA - used_today
+    pct = min(used_today / DAILY_QUOTA * 100, 100)
+    bar_color = "#e53935" if pct>80 else "#FFD700" if pct>50 else "#4CAF50"
+    initials = username[:2].upper() if username else "?"
+
+    # 프로필 카드
+    st.markdown(
+        f"<div class='profile-card'>"
+        f"<div class='avatar'>{initials}</div>"
+        f"<div>"
+        f"<div style='font-size:20px;font-weight:900;color:#f0f0f0;'>{username}</div>"
+        f"<div style='font-size:12px;color:#555;margin-top:4px;'>YouTube 채널 발굴기 사용자</div>"
+        f"</div></div>",
+        unsafe_allow_html=True)
+
+    # 통계 카드 행
+    c1, c2, c3, c4 = st.columns(4)
+    for col, num, lbl, clr in [
+        (c1, stats["sessions"],          "저장된 검색", "#e53935"),
+        (c2, stats["videos"],            "발굴한 영상",  "#FFD700"),
+        (c3, stats["quota"],             "총 쿼타 사용", "#00CFFF"),
+        (c4, q_today["calls"],           "오늘 API 호출", "#4CAF50"),
+    ]:
+        col.markdown(
+            f"<div class='stat-card'>"
+            f"<div class='stat-num' style='color:{clr}'>{num:,}</div>"
+            f"<div class='stat-lbl'>{lbl}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # 쿼타 현황
+    left_col, right_col = st.columns([3, 2])
+    with left_col:
+        st.markdown(
+            f"<div class='quota-bar-wrap'>"
+            f"<div style='font-size:14px;font-weight:800;color:#f0f0f0;margin-bottom:4px;'>📊 오늘 쿼타 현황</div>"
+            f"<div style='font-size:24px;font-weight:900;color:{bar_color};'>{used_today:,} "
+            f"<span style='font-size:14px;color:#555;'>/ {DAILY_QUOTA:,}</span></div>"
+            f"<div class='quota-bar-bg'>"
+            f"<div class='quota-bar-fill' style='width:{pct:.1f}%;background:{bar_color};'></div></div>"
+            f"<div style='display:flex;justify-content:space-between;font-size:12px;color:#555;margin-top:6px;'>"
+            f"<span>사용: <b style='color:{bar_color}'>{used_today:,}</b></span>"
+            f"<span>잔여: <b style='color:#4CAF50'>{remain:,}</b></span>"
+            f"<span>({pct:.1f}%)</span></div>"
+            f"</div>", unsafe_allow_html=True)
+
+    with right_col:
+        st.markdown(
+            "<div class='app-card' style='padding:16px 18px;'>"
+            "<div style='font-size:13px;font-weight:800;color:#f0f0f0;margin-bottom:10px;'>📅 쿼타 이력 (최근 7일)</div>",
+            unsafe_allow_html=True)
+        if q_hist:
+            for h in q_hist:
+                h_pct = min(h["units"] / DAILY_QUOTA * 100, 100)
+                hc = "#e53935" if h_pct>80 else "#FFD700" if h_pct>50 else "#4CAF50"
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:6px;'>"
+                    f"<span style='font-size:11px;color:#555;width:70px;flex-shrink:0;'>{h['date']}</span>"
+                    f"<div style='flex:1;background:#1a1a1a;border-radius:4px;height:6px;'>"
+                    f"<div style='width:{h_pct:.1f}%;height:6px;border-radius:4px;background:{hc};'></div></div>"
+                    f"<span style='font-size:11px;color:{hc};width:50px;text-align:right;'>{h['units']:,}</span>"
+                    f"</div>", unsafe_allow_html=True)
         else:
-            render_grade_summary(rows, t)
+            st.markdown("<div style='color:#555;font-size:12px;'>아직 기록이 없습니다.</div>",
+                        unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-            total_count = len(rows)
+    # 비밀번호 변경
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    with st.expander("🔒 비밀번호 변경"):
+        with st.form("pw_form"):
+            old_pw = st.text_input("현재 비밀번호", type="password")
+            new_pw = st.text_input("새 비밀번호", type="password")
+            new_pw2 = st.text_input("새 비밀번호 확인", type="password")
+            if st.form_submit_button("변경하기", type="primary"):
+                if new_pw != new_pw2: st.error("새 비밀번호가 일치하지 않습니다.")
+                else:
+                    ok, msg = auth.change_password(username, old_pw, new_pw)
+                    st.success(msg) if ok else st.error(msg)
 
-            # ── 키워드별 결과 수 (나만의 키워드 모드일 때) ──
-            kw_stats = st.session_state.get("last_kw_stats", {})
-            if kw_stats and len(kw_stats) > 1:
-                badges = "".join([
-                    f"<span style='background:{t['card_bg']};border:1px solid {t['divider']};"
-                    f"border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;"
-                    f"color:{t['text']};white-space:nowrap;'>"
-                    f"🔖 {kw} <b style='color:#ff0000'>{cnt}개</b></span>"
-                    for kw, cnt in kw_stats.items()
-                ])
-                st.markdown(
-                    f"<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;'>"
-                    f"{badges}</div>",
-                    unsafe_allow_html=True,
-                )
 
-            # 저장 + 정보 행
-            save_col, info_col = st.columns([3, 7])
-            with save_col:
-                save_name = st.text_input(
-                    "저장 이름",
-                    placeholder="예: 영어 가족여행 검색",
-                    label_visibility="collapsed",
-                    key="save_name_input",
-                )
-                if st.button("💾 검색 결과 저장", use_container_width=True, type="primary"):
-                    if not save_name.strip():
-                        st.warning("저장 이름을 입력해 주세요.")
-                    else:
-                        sid = save_session(save_name.strip(), rows)
-                        st.success(f"✅ '{save_name}' 저장 완료! — 📚 기록 탭에서 확인하세요.")
-            with info_col:
-                st.markdown(
-                    f"<div style='padding:8px 12px;background:{t['card_bg']};"
-                    f"border:1px solid {t['divider']};border-radius:10px;'>"
-                    f"<span style='font-size:14px;color:{t['text']};font-weight:700;'>"
-                    f"총 {total_count}개 영상</span> "
-                    f"<span style='color:{t['sub']};font-size:13px;'>&nbsp;|&nbsp; "
-                    f"등급순 정렬 (S→A→B→C) &nbsp;|&nbsp; "
-                    f"이름 입력 후 저장하면 📚 기록 탭에서 언제든 다시 확인 가능</span></div>",
-                    unsafe_allow_html=True,
-                )
+# ── 페이지: API 키 관리 ────────────────────────────────────────────────────────
+def page_apikeys():
+    username = st.session_state.get("username","")
+    render_topbar("🔑 API 키 관리", username)
 
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='app-card'>"
+        "<div style='font-size:15px;font-weight:800;color:#f0f0f0;margin-bottom:6px;'>YouTube Data API v3 키 등록</div>"
+        "<div style='font-size:12px;color:#555;line-height:1.7;'>"
+        "최대 5개의 API 키를 등록할 수 있습니다. 한 키의 쿼타(10,000/일)가 소진되면 자동으로 다음 키로 전환됩니다.<br>"
+        "API 키는 로컬 파일(<code>keys.json</code>)에 저장되며 GitHub에 업로드되지 않습니다."
+        "</div></div>",
+        unsafe_allow_html=True)
 
-            # 등급 필터
-            grade_filter = st.radio(
-                "등급 필터",
-                ["전체", "🏆 S급", "⭐ A급", "🌱 B급", "📺 C급"],
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-            grade_map = {
-                "전체": None, "🏆 S급": "S", "⭐ A급": "A",
-                "🌱 B급": "B", "📺 C급": "C",
-            }
-            filtered = [r for r in rows if grade_map[grade_filter] is None
-                        or r["등급"] == grade_map[grade_filter]]
+    saved_keys = auth.load_api_keys()
+    if "api_keys_raw" not in st.session_state:
+        st.session_state.api_keys_raw = saved_keys
 
+    changed = False
+    for i in range(5):
+        cur = st.session_state.api_keys_raw[i]
+        has = bool(cur.strip())
+        dot = "#4CAF50" if has else "#333"
+        c_no, c_in, c_del = st.columns([0.5, 7, 1.5])
+        with c_no:
             st.markdown(
-                f"<p style='color:{t['sub']};font-size:13px;margin:4px 0 12px'>"
-                f"표시 중: <b style='color:{t['text']}'>{len(filtered)}개</b></p>",
-                unsafe_allow_html=True,
-            )
+                f"<div style='text-align:center;font-size:16px;color:{dot};padding-top:8px;'>●</div>",
+                unsafe_allow_html=True)
+        with c_in:
+            new_val = st.text_input(f"key{i}", value=cur, type="password",
+                                    placeholder=f"API 키 #{i+1}  (AIza...)",
+                                    label_visibility="collapsed", key=f"ak_{i}")
+        with c_del:
+            if st.button("✕ 삭제", key=f"akd_{i}", use_container_width=True, disabled=not has):
+                st.session_state.api_keys_raw[i] = ""
+                auth.save_api_keys(st.session_state.api_keys_raw)
+                st.rerun()
+        if new_val != cur:
+            st.session_state.api_keys_raw[i] = new_val
+            changed = True
 
-            tab1, tab2 = st.tabs(["🎬 카드 보기", "📋 테이블 보기"])
+    if changed:
+        auth.save_api_keys(st.session_state.api_keys_raw)
 
-            with tab1:
-                for row in filtered:
-                    render_card(row, t)
+    valid = get_valid_keys()
+    if valid:
+        st.success(f"✅ 유효한 API 키 {len(valid)}개 저장됨 — 자동으로 폴백합니다", icon="🔑")
+    else:
+        st.error("⚠️ API 키가 없습니다. 위에서 등록해 주세요.")
+        st.markdown("[🔗 Google Cloud Console에서 키 발급받기](https://console.cloud.google.com/)")
 
-            with tab2:
-                df = pd.DataFrame(filtered).drop(
-                    columns=["썸네일", "_channel_id", "_is_short"],
-                )
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "URL": st.column_config.LinkColumn("URL"),
-                        "조회수": st.column_config.NumberColumn(format="%d"),
-                        "좋아요": st.column_config.NumberColumn(format="%d"),
-                        "댓글수": st.column_config.NumberColumn(format="%d"),
-                        "구독자수": st.column_config.NumberColumn(format="%d"),
-                    },
-                )
-                csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-                st.download_button(
-                    "📥 CSV 다운로드",
-                    data=csv,
-                    file_name="한국여행채널_발굴결과.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    with st.expander("ℹ️ API 키 발급 방법"):
+        st.markdown("""
+1. [Google Cloud Console](https://console.cloud.google.com/) 접속
+2. 새 프로젝트 생성 (또는 기존 프로젝트 선택)
+3. **API 및 서비스 → 라이브러리** → `YouTube Data API v3` 검색 → **활성화**
+4. **사용자 인증 정보 → API 키 만들기**
+5. 생성된 키를 위 입력란에 붙여넣기
+6. 일일 할당량: **10,000 유닛** (검색 1회 = 100 유닛)
+""")
+
+
+# ── 메인 ──────────────────────────────────────────────────────────────────────
+def main():
+    st.set_page_config(page_title="한국 여행 채널 발굴기", page_icon="🔍", layout="wide")
+    st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+
+    # 세션 초기화
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+    if "page" not in st.session_state:
+        st.session_state.page = "search"
+    if "results" not in st.session_state:
+        st.session_state.results = []
+    if "my_keywords" not in st.session_state:
+        st.session_state.my_keywords = []
+    if "api_keys_raw" not in st.session_state:
+        st.session_state.api_keys_raw = auth.load_api_keys()
+
+    # 로그인 확인
+    if not st.session_state.logged_in:
+        page_login()
+        return
+
+    username = st.session_state.username
+    page = st.session_state.get("page", "search")
+
+    render_sidebar(username)
+
+    if page in ("search", "custom_kw", "db_search"):
+        page_search(page)
+    elif page == "history":
+        page_history()
+    elif page == "mypage":
+        page_mypage()
+    elif page == "apikeys":
+        page_apikeys()
 
 
 if __name__ == "__main__":

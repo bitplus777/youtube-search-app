@@ -1,4 +1,6 @@
 .env
+keys.json
+search_history.db
 __pycache__/
 *.py[cod]
 .venv/
