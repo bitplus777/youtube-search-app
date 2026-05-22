@@ -277,16 +277,25 @@ def fetch_details(youtube, video_ids: list[str]) -> list[dict]:
     if not video_ids:
         return []
     raw, ch_ids = [], []
+    quota_hit = False
     for i in range(0, len(video_ids), 50):
         chunk = video_ids[i: i + 50]
-        resp = (youtube.videos()
-                .list(part="snippet,statistics,contentDetails", id=",".join(chunk))
-                .execute())
+        try:
+            resp = (youtube.videos()
+                    .list(part="snippet,statistics,contentDetails", id=",".join(chunk))
+                    .execute())
+        except HttpError as e:
+            if "quotaExceeded" in str(e):
+                quota_hit = True
+                break   # 지금까지 수집된 것만 사용
+            raise
         for item in resp.get("items", []):
             raw.append(item)
             cid = item["snippet"].get("channelId", "")
             if cid and cid not in ch_ids:
                 ch_ids.append(cid)
+    if quota_hit and raw:
+        st.warning(f"⚠️ 쿼타 초과로 {len(raw)}개까지만 상세정보를 가져왔습니다.", icon="⚠️")
 
     subs_map = fetch_subs(youtube, ch_ids)
     rows = []
@@ -478,17 +487,18 @@ def main():
 
             all_langs = get_all_languages()
 
-            # 500+ 빠른 설정 버튼
+            # 500+ 빠른 설정 버튼 (안전한 기본값: 10 키워드 × 1페이지 = 500개, 1,000쿼타)
             preset_500 = st.button("⚡ 500+ 결과 자동 설정", use_container_width=True,
-                                   help="영어·일어·중국어 전체 카테고리를 자동 선택합니다")
+                                   help="10개 키워드 × 1페이지 = 약 500개 결과 (쿼타 1,000 소비)")
             if preset_500:
-                st.session_state["db_langs"] = ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文",
-                                                 "🇫🇷 Français", "🇩🇪 Deutsch"]
-                st.session_state["db_cats"] = get_all_categories()
+                st.session_state["db_langs"] = ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文"]
+                st.session_state["db_cats"] = ["가족여행", "특수여행유형", "K-Food"]
+                st.session_state["db_pages"] = 1
+                st.rerun()
 
             default_langs = st.session_state.get("db_langs",
                                                   ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文"])
-            default_cats = st.session_state.get("db_cats", get_all_categories())
+            default_cats = st.session_state.get("db_cats", ["가족여행", "특수여행유형"])
 
             sel_langs = st.multiselect("🌐 언어 선택", all_langs,
                                        default=default_langs,
@@ -504,19 +514,42 @@ def main():
             duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
             sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()))
 
-            pages_per_kw = st.slider("키워드당 페이지 수", 1, 4, 2,
-                                     help="페이지당 50개 수집. 2페이지 = 키워드당 최대 100개")
+            pages_per_kw = st.slider("키워드당 페이지 수", 1, 2,
+                                     st.session_state.get("db_pages", 1),
+                                     help="페이지당 50개. 1페이지 권장 (쿼타 절약)")
             max_results = pages_per_kw * 50
             pages_arg = pages_per_kw
 
-            est = kw_count * max_results
-            st.info(
-                f"키워드 **{kw_count}개** × 최대 **{max_results}개** "
-                f"= 예상 최대 **~{est:,}개**",
-                icon="📊",
-            )
-            if est < 500:
-                st.warning("500개 이상 원하시면 ⚡ 자동 설정 버튼을 눌러주세요", icon="💡")
+            # ── 쿼타 계산기 ──────────────────────────────────────────────
+            # search.list = 100 쿼타/호출, videos.list = 1 쿼타/50개, channels.list ≈ 1
+            DAILY_QUOTA = 10_000
+            search_quota = kw_count * pages_per_kw * 100
+            detail_quota = (kw_count * max_results // 50) + kw_count
+            total_quota = search_quota + detail_quota
+            quota_pct = total_quota / DAILY_QUOTA * 100
+
+            # 실제 검색 가능 키워드 수 (쿼타 한도 내)
+            safe_kw_limit = max(1, int((DAILY_QUOTA * 0.8) / (pages_per_kw * 100)))
+            actual_kws = min(kw_count, safe_kw_limit)
+            est = actual_kws * max_results
+
+            if quota_pct <= 50:
+                st.success(
+                    f"예상 쿼타: **{total_quota:,} / {DAILY_QUOTA:,}** ({quota_pct:.0f}%) ✅  "
+                    f"| 키워드 **{actual_kws}개** → 최대 **~{est:,}개**",
+                    icon="📊",
+                )
+            elif quota_pct <= 85:
+                st.warning(
+                    f"⚠️ 예상 쿼타: **{total_quota:,} / {DAILY_QUOTA:,}** ({quota_pct:.0f}%)  "
+                    f"| 실제 검색은 **{actual_kws}개** 키워드로 제한됩니다.",
+                    icon="⚠️",
+                )
+            else:
+                st.error(
+                    f"🚫 쿼타 초과 위험 ({quota_pct:.0f}%)! 자동으로 **{actual_kws}개** 키워드만 검색합니다.  "
+                    f"키워드 수를 줄이거나 페이지 수를 낮춰주세요.",
+                )
 
             published_days = st.selectbox("업로드 기간",
                 ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"])
@@ -565,7 +598,15 @@ def main():
             if not selected_kws:
                 st.warning("언어 또는 카테고리를 선택해 주세요.")
                 st.stop()
-            keywords_to_search = selected_kws
+            # 쿼타 안전 상한 적용 (일일 한도의 80% 이내)
+            safe_limit = max(1, int(8_000 / (pages_arg * 100)))
+            keywords_to_search = selected_kws[:safe_limit]
+            if len(selected_kws) > safe_limit:
+                st.info(
+                    f"쿼타 보호: {len(selected_kws)}개 키워드 중 "
+                    f"**{safe_limit}개**만 검색합니다 (일일 한도 80% 기준).",
+                    icon="🛡️",
+                )
 
         all_ids: dict[str, str] = {}  # video_id → search_keyword
         total = len(keywords_to_search)
