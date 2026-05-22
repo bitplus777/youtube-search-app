@@ -1,7 +1,11 @@
-"""YouTube 동영상 검색 앱 (YouTube Data API v3)"""
+"""
+유튜브 한국 여행 채널 발굴 앱
+등급 기준: S급(원석) → A급(신진) → B급(성장) → C급(일반)
+"""
 
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -10,14 +14,53 @@ from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from keywords import (
+    filter_keywords,
+    get_all_categories,
+    get_all_languages,
+    keyword_count,
+)
+
 load_dotenv()
 
-DATE_FILTERS = {
-    "전체": None,
-    "오늘": lambda now: now.replace(hour=0, minute=0, second=0, microsecond=0),
-    "이번 주": lambda now: now - timedelta(days=7),
-    "이번 달": lambda now: now - timedelta(days=30),
-    "올해": lambda now: now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0),
+# ── 등급 정의 ─────────────────────────────────────────────────────────────────
+GRADES = {
+    "S": {
+        "label": "S급",
+        "icon": "🏆",
+        "color": "#FFD700",
+        "bg": "#1a1500",
+        "border": "#FFD700",
+        "desc": "구독자 1만↓ · 업로드 7일↓ · 조회수 1만↓",
+        "badge": "background:#FFD700;color:#000;",
+    },
+    "A": {
+        "label": "A급",
+        "icon": "⭐",
+        "color": "#00CFFF",
+        "bg": "#001a22",
+        "border": "#00CFFF",
+        "desc": "구독자 5만↓ · 업로드 30일↓ · 조회수 5만↓",
+        "badge": "background:#00CFFF;color:#000;",
+    },
+    "B": {
+        "label": "B급",
+        "icon": "🌱",
+        "color": "#4CAF50",
+        "bg": "#0a1a0a",
+        "border": "#4CAF50",
+        "desc": "구독자 20만↓ · 업로드 90일↓",
+        "badge": "background:#4CAF50;color:#fff;",
+    },
+    "C": {
+        "label": "C급",
+        "icon": "📺",
+        "color": "#888888",
+        "bg": "#1a1a1a",
+        "border": "#444444",
+        "desc": "대형 채널 또는 오래된 영상",
+        "badge": "background:#555;color:#ccc;",
+    },
 }
 
 DURATION_FILTERS = {
@@ -33,273 +76,127 @@ SORT_OPTIONS = {
     "조회수": "viewCount",
 }
 
-# ─── 테마 색상 팔레트 ─────────────────────────────────────────────────────────
 THEMES = {
     "dark": {
-        "bg": "#0f0f0f",
-        "sidebar_bg": "#161616",
-        "card_bg": "#1a1a1a",
-        "card_border": "#2d2d2d",
-        "card_hover": "#ff0000",
-        "title_color": "#f1f1f1",
-        "channel_color": "#aaaaaa",
-        "stat_value": "#e0e0e0",
-        "stat_label": "#888888",
-        "meta_bg": "#2a2a2a",
-        "meta_color": "#888888",
-        "text_primary": "#f1f1f1",
-        "text_secondary": "#888888",
-        "divider": "#2a2a2a",
-        "badge_bg": "rgba(0,0,0,0.85)",
-        "badge_color": "#ffffff",
-        "streamlit_bg": "#0f0f0f",
-        "streamlit_secondary": "#1a1a1a",
-        "streamlit_text": "#f1f1f1",
+        "bg": "#0a0a0a", "card_bg": "#141414", "card_border": "#2a2a2a",
+        "sidebar_bg": "#111", "text": "#f1f1f1", "sub": "#888",
+        "divider": "#2a2a2a", "meta_bg": "#222", "badge_bg": "rgba(0,0,0,0.85)",
     },
     "light": {
-        "bg": "#ffffff",
-        "sidebar_bg": "#f8f8f8",
-        "card_bg": "#ffffff",
-        "card_border": "#e0e0e0",
-        "card_hover": "#ff0000",
-        "title_color": "#0f0f0f",
-        "channel_color": "#606060",
-        "stat_value": "#1a1a1a",
-        "stat_label": "#666666",
-        "meta_bg": "#f2f2f2",
-        "meta_color": "#606060",
-        "text_primary": "#0f0f0f",
-        "text_secondary": "#606060",
-        "divider": "#e5e5e5",
-        "badge_bg": "rgba(0,0,0,0.75)",
-        "badge_color": "#ffffff",
-        "streamlit_bg": "#ffffff",
-        "streamlit_secondary": "#f8f8f8",
-        "streamlit_text": "#0f0f0f",
+        "bg": "#f5f5f5", "card_bg": "#ffffff", "card_border": "#e0e0e0",
+        "sidebar_bg": "#fafafa", "text": "#111", "sub": "#666",
+        "divider": "#e5e5e5", "meta_bg": "#f0f0f0", "badge_bg": "rgba(0,0,0,0.7)",
     },
 }
 
 
+# ── CSS ───────────────────────────────────────────────────────────────────────
 def build_css(t: dict) -> str:
     return f"""
 <style>
-/* ── Streamlit 기본 오버라이드 ── */
-.stApp, .stApp > .main, .block-container {{
-    background-color: {t['bg']} !important;
-    color: {t['text_primary']} !important;
-}}
-section[data-testid="stSidebar"] {{
-    background-color: {t['sidebar_bg']} !important;
-}}
-section[data-testid="stSidebar"] * {{
-    color: {t['text_primary']} !important;
-}}
-.stTextInput input, .stSelectbox select, .stNumberInput input {{
-    background-color: {t['card_bg']} !important;
-    color: {t['text_primary']} !important;
-    border-color: {t['card_border']} !important;
-}}
-.stTabs [data-baseweb="tab-list"] {{
-    background-color: {t['card_bg']} !important;
-    border-bottom: 2px solid {t['divider']};
-}}
-.stTabs [data-baseweb="tab"] {{
-    color: {t['text_secondary']} !important;
-}}
-.stTabs [aria-selected="true"] {{
-    color: #ff0000 !important;
-    border-bottom: 2px solid #ff0000 !important;
-}}
-.stDataFrame {{ background: {t['card_bg']} !important; }}
-div[data-testid="stMarkdownContainer"] p,
-div[data-testid="stMarkdownContainer"] span,
-div[data-testid="stMarkdownContainer"] h1,
-div[data-testid="stMarkdownContainer"] h2,
-div[data-testid="stMarkdownContainer"] h3 {{
-    color: {t['text_primary']} !important;
-}}
+.stApp,.main,.block-container{{background:{t['bg']}!important;color:{t['text']}!important}}
+section[data-testid="stSidebar"]{{background:{t['sidebar_bg']}!important}}
+section[data-testid="stSidebar"] *{{color:{t['text']}!important}}
+.stTextInput input,.stSelectbox select,.stNumberInput input,.stMultiSelect div{{
+  background:{t['card_bg']}!important;color:{t['text']}!important;border-color:{t['card_border']}!important}}
+.stTabs [data-baseweb="tab-list"]{{background:{t['card_bg']}!important;border-bottom:2px solid {t['divider']}}}
+.stTabs [data-baseweb="tab"]{{color:{t['sub']}!important}}
+.stTabs [aria-selected="true"]{{color:#ff0000!important;border-bottom:2px solid #ff0000!important}}
+div[data-testid="stMarkdownContainer"] *{{color:{t['text']}!important}}
+
+/* ── 등급 요약 카드 ── */
+.grade-summary{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+.grade-box{{flex:1;min-width:120px;border-radius:12px;padding:14px 16px;text-align:center;border:1px solid;}}
+.grade-count{{font-size:28px;font-weight:900;line-height:1}}
+.grade-label{{font-size:13px;font-weight:700;margin-top:4px}}
+.grade-desc{{font-size:10px;opacity:.65;margin-top:2px;line-height:1.3}}
 
 /* ── 비디오 카드 ── */
-.video-card {{
-    background: {t['card_bg']};
-    border: 1px solid {t['card_border']};
-    border-radius: 14px;
-    margin-bottom: 16px;
-    overflow: hidden;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+.video-card{{
+  border-radius:14px;margin-bottom:14px;overflow:hidden;
+  border:1px solid {t['card_border']};background:{t['card_bg']};
+  transition:border-color .2s,box-shadow .2s;
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
 }}
-.video-card:hover {{
-    border-color: {t['card_hover']};
-    box-shadow: 0 4px 16px rgba(255,0,0,0.12);
-}}
-.card-inner {{
-    display: flex;
-    align-items: stretch;
-}}
-.thumb-wrap {{
-    flex: 0 0 260px;
-    position: relative;
-    overflow: hidden;
-    border-radius: 14px 0 0 14px;
-    background: #000;
-}}
-.thumb-wrap img {{
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    transition: transform 0.3s;
-}}
-.video-card:hover .thumb-wrap img {{ transform: scale(1.03); }}
-.duration-badge {{
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    background: {t['badge_bg']};
-    color: {t['badge_color']};
-    font-size: 12px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: 5px;
-    letter-spacing: 0.3px;
-}}
-.card-info {{
-    flex: 1;
-    padding: 18px 22px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-}}
-.video-title {{
-    font-size: 16px;
-    font-weight: 700;
-    color: {t['title_color']};
-    line-height: 1.45;
-    margin: 0 0 2px 0;
-    word-break: break-word;
-}}
-.video-title a {{
-    color: {t['title_color']};
-    text-decoration: none;
-}}
-.video-title a:hover {{ color: #ff0000; }}
-.channel-name {{
-    font-size: 13px;
-    color: {t['channel_color']};
-    font-weight: 600;
-    margin: 0;
-}}
-.stats-row {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-    margin-top: 8px;
-    padding-top: 10px;
-    border-top: 1px solid {t['divider']};
-}}
-.stat-item {{
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-}}
-.stat-label {{
-    font-size: 10px;
-    color: {t['stat_label']};
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    margin-bottom: 3px;
-    font-weight: 600;
-}}
-.stat-value {{
-    font-size: 15px;
-    font-weight: 700;
-    color: {t['stat_value']};
-}}
-.stat-value.red {{ color: #ff4444; }}
-.meta-row {{
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-}}
-.meta-tag {{
-    font-size: 12px;
-    color: {t['meta_color']};
-    background: {t['meta_bg']};
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-weight: 500;
-}}
-.watch-btn {{
-    display: inline-block;
-    margin-top: 10px;
-    background: #ff0000;
-    color: #fff !important;
-    font-size: 13px;
-    font-weight: 700;
-    padding: 8px 22px;
-    border-radius: 20px;
-    text-decoration: none !important;
-    width: fit-content;
-    letter-spacing: 0.3px;
-    transition: background 0.2s;
-}}
-.watch-btn:hover {{ background: #cc0000; }}
+.video-card:hover{{box-shadow:0 6px 20px rgba(255,0,0,.12)}}
+.card-inner{{display:flex;align-items:stretch}}
+.thumb-wrap{{flex:0 0 250px;position:relative;overflow:hidden;border-radius:14px 0 0 14px;background:#000}}
+.thumb-wrap img{{width:100%;height:100%;object-fit:cover;display:block;transition:transform .3s}}
+.video-card:hover .thumb-wrap img{{transform:scale(1.04)}}
+.dur-badge{{
+  position:absolute;bottom:8px;right:8px;
+  background:{t['badge_bg']};color:#fff;font-size:11px;font-weight:700;
+  padding:2px 7px;border-radius:4px}}
+.grade-badge{{
+  position:absolute;top:8px;left:8px;
+  font-size:12px;font-weight:900;padding:3px 10px;border-radius:20px;
+  letter-spacing:.5px}}
+.card-info{{flex:1;padding:16px 20px;display:flex;flex-direction:column;gap:7px;min-width:0}}
+.v-title{{font-size:15px;font-weight:700;color:{t['text']};line-height:1.45;margin:0 0 2px;word-break:break-word}}
+.v-title a{{color:{t['text']};text-decoration:none}}
+.v-title a:hover{{color:#ff0000}}
+.ch-name{{font-size:13px;color:{t['sub']};font-weight:600;margin:0}}
+.stats-row{{display:flex;flex-wrap:wrap;gap:16px;margin-top:6px;padding-top:8px;border-top:1px solid {t['divider']}}}
+.stat-item{{display:flex;flex-direction:column}}
+.s-label{{font-size:10px;color:{t['sub']};text-transform:uppercase;letter-spacing:.7px;font-weight:600}}
+.s-val{{font-size:14px;font-weight:700;color:{t['text']}}}
+.s-val.red{{color:#ff4444}}
+.meta-row{{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}}
+.meta-tag{{font-size:11px;color:{t['sub']};background:{t['meta_bg']};border-radius:5px;padding:2px 9px}}
+.watch-btn{{
+  display:inline-block;margin-top:8px;background:#ff0000;color:#fff!important;
+  font-size:12px;font-weight:700;padding:7px 18px;border-radius:18px;
+  text-decoration:none!important;transition:background .2s}}
+.watch-btn:hover{{background:#cc0000}}
 
-/* ── 헤더 영역 ── */
-.app-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 8px;
-    border-bottom: 2px solid {t['divider']};
-    margin-bottom: 20px;
-}}
-.app-title {{
-    font-size: 26px;
-    font-weight: 800;
-    color: {t['text_primary']};
-    margin: 0;
-}}
-.app-subtitle {{
-    font-size: 13px;
-    color: {t['text_secondary']};
-    margin: 2px 0 0 0;
-}}
-
-.result-header {{
-    color: {t['text_secondary']};
-    font-size: 14px;
-    margin-bottom: 14px;
-}}
-.keyword-hl {{ color: #ff0000; font-weight: 700; }}
+/* ── 필터 탭 ── */
+.grade-filter{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}
+.gf-btn{{
+  padding:6px 16px;border-radius:20px;border:1px solid;font-size:12px;font-weight:700;
+  cursor:pointer;background:transparent;transition:.2s}}
 </style>
 """
 
 
-def fmt_number(n: int) -> str:
+# ── 유틸리티 ──────────────────────────────────────────────────────────────────
+def fmt_num(n: int) -> str:
     if n >= 100_000_000:
-        return f"{n / 100_000_000:.1f}억"
+        return f"{n/100_000_000:.1f}억"
     if n >= 10_000:
-        return f"{n / 10_000:.1f}만"
+        return f"{n/10_000:.1f}만"
     return f"{n:,}"
 
 
-def parse_iso8601_duration(duration: str) -> str:
-    if not duration:
+def parse_duration(d: str) -> str:
+    if not d:
         return ""
-    match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration)
-    if not match:
-        return duration
-    hours, minutes, seconds = (int(g or 0) for g in match.groups())
-    if hours:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes}:{seconds:02d}"
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d)
+    if not m:
+        return d
+    h, mi, s = (int(g or 0) for g in m.groups())
+    return f"{h}:{mi:02d}:{s:02d}" if h else f"{mi}:{s:02d}"
 
 
-def get_youtube_client(api_key: str):
+def days_since(published_at: str) -> int:
+    try:
+        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).days
+    except Exception:
+        return 9999
+
+
+def calculate_grade(subs: int, views: int, days: int) -> str:
+    if subs < 10_000 and views < 10_000 and days <= 7:
+        return "S"
+    if subs < 50_000 and views < 50_000 and days <= 30:
+        return "A"
+    if subs < 200_000 and days <= 90:
+        return "B"
+    return "C"
+
+
+# ── YouTube API ───────────────────────────────────────────────────────────────
+def get_client(api_key: str):
     if not api_key:
         return None
     try:
@@ -308,139 +205,135 @@ def get_youtube_client(api_key: str):
         return None
 
 
-def published_after_rfc3339(label: str) -> str | None:
-    fn = DATE_FILTERS.get(label)
-    if fn is None:
-        return None
-    dt = fn(datetime.now(timezone.utc))
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def search_video_ids(youtube, keyword, date_filter, duration_filter, sort_by, max_results):
-    params = {
-        "part": "snippet",
-        "q": keyword,
-        "type": "video",
-        "order": SORT_OPTIONS[sort_by],
-        "maxResults": min(max_results, 50),
+def search_ids(youtube, keyword: str, duration_filter: str,
+               sort_by: str, max_results: int,
+               published_after: str | None = None,
+               max_pages: int = 1) -> list[str]:
+    """
+    YouTube search.list 호출. max_pages 설정으로 페이지네이션 지원.
+    페이지당 최대 50개 → max_pages=4 이면 최대 200개/키워드.
+    """
+    base_params = {
+        "part": "snippet", "q": keyword, "type": "video",
+        "order": SORT_OPTIONS.get(sort_by, "relevance"),
+        "maxResults": 50,
     }
-    published = published_after_rfc3339(date_filter)
-    if published:
-        params["publishedAfter"] = published
-    duration = DURATION_FILTERS.get(duration_filter)
-    if duration:
-        params["videoDuration"] = duration
-    response = youtube.search().list(**params).execute()
-    return [item["id"]["videoId"] for item in response.get("items", [])]
+    if published_after:
+        base_params["publishedAfter"] = published_after
+    dur = DURATION_FILTERS.get(duration_filter)
+    if dur:
+        base_params["videoDuration"] = dur
+
+    ids: list[str] = []
+    page_token: str | None = None
+
+    for _ in range(max(1, max_pages)):
+        params = dict(base_params)
+        if page_token:
+            params["pageToken"] = page_token
+        resp = youtube.search().list(**params).execute()
+        ids += [item["id"]["videoId"] for item in resp.get("items", [])]
+        page_token = resp.get("nextPageToken")
+        if not page_token or len(ids) >= max_results:
+            break
+
+    return ids[:max_results]
 
 
-def fetch_channel_subscribers(youtube, channel_ids: list[str]) -> dict[str, int]:
-    if not channel_ids:
-        return {}
+def fetch_subs(youtube, channel_ids: list[str]) -> dict[str, int]:
     result = {}
     for i in range(0, len(channel_ids), 50):
-        chunk = channel_ids[i : i + 50]
+        chunk = channel_ids[i: i + 50]
         resp = youtube.channels().list(part="statistics", id=",".join(chunk)).execute()
         for item in resp.get("items", []):
-            subs = item.get("statistics", {}).get("subscriberCount")
-            result[item["id"]] = int(subs) if subs else 0
+            s = item.get("statistics", {}).get("subscriberCount")
+            result[item["id"]] = int(s) if s else 0
     return result
 
 
-def fetch_video_details(youtube, video_ids: list[str]) -> list[dict]:
+def fetch_details(youtube, video_ids: list[str]) -> list[dict]:
     if not video_ids:
         return []
-    raw_items = []
-    channel_ids = []
-
+    raw, ch_ids = [], []
     for i in range(0, len(video_ids), 50):
-        chunk = video_ids[i : i + 50]
-        resp = (
-            youtube.videos()
-            .list(part="snippet,statistics,contentDetails", id=",".join(chunk))
-            .execute()
-        )
+        chunk = video_ids[i: i + 50]
+        resp = (youtube.videos()
+                .list(part="snippet,statistics,contentDetails", id=",".join(chunk))
+                .execute())
         for item in resp.get("items", []):
-            raw_items.append(item)
+            raw.append(item)
             cid = item["snippet"].get("channelId", "")
-            if cid and cid not in channel_ids:
-                channel_ids.append(cid)
+            if cid and cid not in ch_ids:
+                ch_ids.append(cid)
 
-    subs_map = fetch_channel_subscribers(youtube, channel_ids)
+    subs_map = fetch_subs(youtube, ch_ids)
     rows = []
-    for item in raw_items:
-        snippet = item["snippet"]
-        stats = item.get("statistics", {})
-        content = item.get("contentDetails", {})
-        video_id = item["id"]
-        channel_id = snippet.get("channelId", "")
-        rows.append(
-            {
-                "제목": snippet.get("title", ""),
-                "채널명": snippet.get("channelTitle", ""),
-                "구독자수": subs_map.get(channel_id, 0),
-                "URL": f"https://www.youtube.com/watch?v={video_id}",
-                "업로드일": snippet.get("publishedAt", "")[:10],
-                "조회수": int(stats.get("viewCount", 0)),
-                "좋아요": int(stats.get("likeCount", 0)),
-                "댓글수": int(stats.get("commentCount", 0)),
-                "재생시간": parse_iso8601_duration(content.get("duration", "")),
-                "썸네일": (
-                    snippet.get("thumbnails", {}).get("high", {}).get("url", "")
-                    or snippet.get("thumbnails", {}).get("medium", {}).get("url", "")
-                ),
-            }
-        )
+    for item in raw:
+        sn = item["snippet"]
+        st = item.get("statistics", {})
+        cd = item.get("contentDetails", {})
+        vid = item["id"]
+        pub = sn.get("publishedAt", "")
+        subs = subs_map.get(sn.get("channelId", ""), 0)
+        views = int(st.get("viewCount", 0))
+        d = days_since(pub)
+        rows.append({
+            "등급": calculate_grade(subs, views, d),
+            "제목": sn.get("title", ""),
+            "채널명": sn.get("channelTitle", ""),
+            "구독자수": subs,
+            "URL": f"https://www.youtube.com/watch?v={vid}",
+            "업로드일": pub[:10],
+            "업로드경과일": d,
+            "조회수": views,
+            "좋아요": int(st.get("likeCount", 0)),
+            "댓글수": int(st.get("commentCount", 0)),
+            "재생시간": parse_duration(cd.get("duration", "")),
+            "썸네일": (sn.get("thumbnails", {}).get("high", {}).get("url", "")
+                      or sn.get("thumbnails", {}).get("medium", {}).get("url", "")),
+            "_channel_id": sn.get("channelId", ""),
+        })
     return rows
 
 
-def apply_view_filters(rows, min_views, max_views):
-    if min_views and min_views > 0:
-        rows = [r for r in rows if r["조회수"] >= min_views]
-    if max_views and max_views > 0:
-        rows = [r for r in rows if r["조회수"] <= max_views]
-    return rows
-
-
-def render_video_card(row: dict):
+# ── 카드 렌더링 ───────────────────────────────────────────────────────────────
+def render_card(row: dict, t: dict):
+    g = GRADES[row["등급"]]
     thumb = row["썸네일"]
-    thumb_html = (
-        f'<img src="{thumb}" alt="썸네일">'
-        if thumb
-        else '<div style="background:#2a2a2a;width:100%;height:158px;"></div>'
-    )
-    dur = row["재생시간"]
-    dur_badge = f'<span class="duration-badge">{dur}</span>' if dur else ""
+    thumb_html = (f'<img src="{thumb}" alt="썸네일">' if thumb
+                  else f'<div style="background:#222;width:100%;height:155px;"></div>')
 
-    st.markdown(
-        f"""
-<div class="video-card">
+    st.markdown(f"""
+<div class="video-card" style="border-color:{g['border']}">
   <div class="card-inner">
     <div class="thumb-wrap">
       {thumb_html}
-      {dur_badge}
+      <span class="grade-badge" style="{g['badge']}">{g['icon']} {g['label']}</span>
+      <span class="dur-badge">{row['재생시간']}</span>
     </div>
     <div class="card-info">
-      <p class="video-title">
-        <a href="{row['URL']}" target="_blank">{row['제목']}</a>
-      </p>
-      <p class="channel-name">📺 {row['채널명']}</p>
+      <p class="v-title"><a href="{row['URL']}" target="_blank">{row['제목']}</a></p>
+      <p class="ch-name">📺 {row['채널명']}</p>
       <div class="stats-row">
         <div class="stat-item">
-          <span class="stat-label">구독자</span>
-          <span class="stat-value">👥 {fmt_number(row['구독자수'])}</span>
+          <span class="s-label">구독자</span>
+          <span class="s-val">👥 {fmt_num(row['구독자수'])}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">조회수</span>
-          <span class="stat-value red">▶ {fmt_number(row['조회수'])}</span>
+          <span class="s-label">조회수</span>
+          <span class="s-val red">▶ {fmt_num(row['조회수'])}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">좋아요</span>
-          <span class="stat-value">👍 {fmt_number(row['좋아요'])}</span>
+          <span class="s-label">좋아요</span>
+          <span class="s-val">👍 {fmt_num(row['좋아요'])}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">댓글</span>
-          <span class="stat-value">💬 {fmt_number(row['댓글수'])}</span>
+          <span class="s-label">댓글</span>
+          <span class="s-val">💬 {fmt_num(row['댓글수'])}</span>
+        </div>
+        <div class="stat-item">
+          <span class="s-label">업로드 후</span>
+          <span class="s-val">📅 {row['업로드경과일']}일</span>
         </div>
       </div>
       <div class="meta-row">
@@ -450,145 +343,309 @@ def render_video_card(row: dict):
       <a class="watch-btn" href="{row['URL']}" target="_blank">▶ 영상 보기</a>
     </div>
   </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+</div>""", unsafe_allow_html=True)
 
 
+def render_grade_summary(rows: list[dict], t: dict):
+    counts = {g: sum(1 for r in rows if r["등급"] == g) for g in "SABC"}
+    boxes = ""
+    for g, cfg in GRADES.items():
+        boxes += f"""
+<div class="grade-box" style="border-color:{cfg['border']};background:{cfg['bg']};">
+  <div class="grade-count" style="color:{cfg['color']}">{cfg['icon']} {counts[g]}</div>
+  <div class="grade-label" style="color:{cfg['color']}">{cfg['label']}</div>
+  <div class="grade-desc" style="color:{t['sub']}">{cfg['desc']}</div>
+</div>"""
+    st.markdown(f'<div class="grade-summary">{boxes}</div>', unsafe_allow_html=True)
+
+
+# ── 메인 앱 ───────────────────────────────────────────────────────────────────
 def main():
-    st.set_page_config(page_title="유튜브 검색", page_icon="▶️", layout="wide")
+    st.set_page_config(page_title="한국 여행 채널 발굴기", page_icon="🔍", layout="wide")
 
-    # ── 테마 초기화 ──────────────────────────────────────────────────────────
     if "theme" not in st.session_state:
         st.session_state.theme = "dark"
+    if "results" not in st.session_state:
+        st.session_state.results = []
+    if "last_keyword" not in st.session_state:
+        st.session_state.last_keyword = ""
 
     t = THEMES[st.session_state.theme]
     st.markdown(build_css(t), unsafe_allow_html=True)
 
-    # ── 헤더 (제목 + 테마 토글) ─────────────────────────────────────────────
-    col_title, col_toggle = st.columns([8, 1])
+    # ── 헤더 ──────────────────────────────────────────────────────────────────
+    col_title, col_toggle = st.columns([9, 1])
     with col_title:
         st.markdown(
-            f"<p class='app-title'>▶ 유튜브 동영상 검색</p>"
-            f"<p class='app-subtitle'>YouTube Data API v3 기반 검색 도구</p>",
+            f"<h1 style='color:{t['text']};margin-bottom:2px;font-size:24px;'>"
+            "🔍 한국 여행 채널 발굴기</h1>"
+            f"<p style='color:{t['sub']};margin:0;font-size:13px;'>"
+            "전 세계 숨겨진 한국 여행 채널을 S·A·B·C 등급으로 분류합니다</p>",
             unsafe_allow_html=True,
         )
     with col_toggle:
         is_dark = st.session_state.theme == "dark"
-        label = "☀️ 낮 모드" if is_dark else "🌙 밤 모드"
-        if st.button(label, use_container_width=True):
+        if st.button("☀️ 낮" if is_dark else "🌙 밤", use_container_width=True):
             st.session_state.theme = "light" if is_dark else "dark"
             st.rerun()
 
-    st.markdown(f"<hr style='border:none;border-top:2px solid {t['divider']};margin:4px 0 20px 0;'>", unsafe_allow_html=True)
+    st.markdown(f"<hr style='border:none;border-top:2px solid {t['divider']};margin:6px 0 16px;'>",
+                unsafe_allow_html=True)
 
-    # ── 사이드바 ─────────────────────────────────────────────────────────────
+    # ── 사이드바 ──────────────────────────────────────────────────────────────
     with st.sidebar:
-        st.markdown("### 🔑 API 설정")
+        st.markdown("### 🔑 API 키")
         env_key = os.getenv("YOUTUBE_API_KEY", "")
-        api_key_input = st.text_input(
-            "YouTube API Key",
-            value=env_key,
-            type="password",
-            placeholder="AIza...",
-            help="Google Cloud Console에서 발급한 YouTube Data API v3 키를 입력하세요.",
-        )
-        api_key = api_key_input.strip() or env_key
+        api_input = st.text_input("YouTube API Key", value=env_key,
+                                  type="password", placeholder="AIza...")
+        api_key = api_input.strip() or env_key
         if api_key:
-            st.success("API 키 설정 완료", icon="✅")
+            st.success("API 키 설정됨", icon="✅")
         else:
-            st.warning("API 키를 입력하세요", icon="⚠️")
-            st.markdown("[🔗 API 키 발급하기](https://console.cloud.google.com/)")
+            st.warning("API 키 필요", icon="⚠️")
+            st.markdown("[🔗 API 키 발급](https://console.cloud.google.com/)")
 
         st.divider()
-        st.markdown("### 🔍 검색 설정")
-        keyword = st.text_input("검색어", placeholder="예: 파이썬 강의")
-        date_filter = st.selectbox("업로드 날짜", list(DATE_FILTERS.keys()))
-        duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
-        sort_by = st.selectbox("정렬 기준", list(SORT_OPTIONS.keys()))
+
+        # ── 검색 모드 선택 ──
+        mode = st.radio("검색 모드", ["🔎 빠른 검색", "🗂 키워드 DB 검색"],
+                        help="빠른 검색: 단일 키워드 / DB 검색: 언어·카테고리 선택 후 대량 검색")
+
+        st.divider()
+
+        pub_map = {"7일 이내": 7, "30일 이내": 30, "90일 이내": 90, "1년 이내": 365}
+
+        if mode == "🔎 빠른 검색":
+            st.markdown("### 🔍 검색")
+            keyword_input = st.text_input("검색어", placeholder="예: korea hiking vlog")
+            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
+            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()))
+            pages_qs = st.slider("페이지 수 (페이지당 50개)", 1, 4, 2,
+                                  help="2페이지 = 최대 100개, 4페이지 = 최대 200개")
+            max_results = pages_qs * 50
+            published_days = st.selectbox("업로드 기간",
+                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"])
+            pub_after = None
+            if published_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+                pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            pages_arg = pages_qs
+            search_clicked = st.button("🔍 검색", type="primary", use_container_width=True)
+
+        else:
+            st.markdown("### 🗂 키워드 DB 검색")
+
+            all_langs = get_all_languages()
+
+            # 500+ 빠른 설정 버튼
+            preset_500 = st.button("⚡ 500+ 결과 자동 설정", use_container_width=True,
+                                   help="영어·일어·중국어 전체 카테고리를 자동 선택합니다")
+            if preset_500:
+                st.session_state["db_langs"] = ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文",
+                                                 "🇫🇷 Français", "🇩🇪 Deutsch"]
+                st.session_state["db_cats"] = get_all_categories()
+
+            default_langs = st.session_state.get("db_langs",
+                                                  ["🇺🇸 English", "🇯🇵 日本語", "🇨🇳 中文"])
+            default_cats = st.session_state.get("db_cats", get_all_categories())
+
+            sel_langs = st.multiselect("🌐 언어 선택", all_langs,
+                                       default=default_langs,
+                                       placeholder="언어를 선택하세요")
+            all_cats = get_all_categories()
+            sel_cats = st.multiselect("📂 카테고리 선택", all_cats,
+                                      default=default_cats,
+                                      placeholder="카테고리를 선택하세요")
+
+            selected_kws = filter_keywords(sel_langs or None, sel_cats or None)
+            kw_count = len(selected_kws)
+
+            duration_filter = st.selectbox("영상 길이", list(DURATION_FILTERS.keys()))
+            sort_by = st.selectbox("정렬", list(SORT_OPTIONS.keys()))
+
+            pages_per_kw = st.slider("키워드당 페이지 수", 1, 4, 2,
+                                     help="페이지당 50개 수집. 2페이지 = 키워드당 최대 100개")
+            max_results = pages_per_kw * 50
+            pages_arg = pages_per_kw
+
+            est = kw_count * max_results
+            st.info(
+                f"키워드 **{kw_count}개** × 최대 **{max_results}개** "
+                f"= 예상 최대 **~{est:,}개**",
+                icon="📊",
+            )
+            if est < 500:
+                st.warning("500개 이상 원하시면 ⚡ 자동 설정 버튼을 눌러주세요", icon="💡")
+
+            published_days = st.selectbox("업로드 기간",
+                ["전체", "7일 이내", "30일 이내", "90일 이내", "1년 이내"])
+            pub_after = None
+            if published_days in pub_map:
+                dt = datetime.now(timezone.utc) - timedelta(days=pub_map[published_days])
+                pub_after = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            search_clicked = st.button("🚀 대량 검색 시작", type="primary",
+                                       use_container_width=True,
+                                       disabled=(kw_count == 0))
+            keyword_input = ""
 
         st.divider()
         st.markdown("### 📊 조회수 필터")
-        min_views = st.number_input("최소 조회수", min_value=0, value=0, step=10000, help="0 = 제한 없음")
-        max_views = st.number_input("최대 조회수", min_value=0, value=0, step=10000, help="0 = 제한 없음")
-        max_results = st.slider("최대 결과 수", 5, 50, 20)
+        min_views = st.number_input("최소 조회수", min_value=0, value=0, step=1000)
+        max_views = st.number_input("최대 조회수", min_value=0, value=0, step=1000)
 
-        search_clicked = st.button("🔍 검색", type="primary", use_container_width=True)
+    # ── 검색 실행 ─────────────────────────────────────────────────────────────
+    if search_clicked:
+        if not api_key:
+            st.error("사이드바에 YouTube API 키를 입력해 주세요.")
+            st.stop()
 
-    # ── 메인 컨텐츠 ──────────────────────────────────────────────────────────
-    if not search_clicked:
+        youtube = get_client(api_key)
+        if not youtube:
+            st.error("API 키가 유효하지 않습니다.")
+            st.stop()
+
+        if mode == "🔎 빠른 검색":
+            if not keyword_input.strip():
+                st.warning("검색어를 입력해 주세요.")
+                st.stop()
+            keywords_to_search = [keyword_input.strip()]
+        else:
+            if not selected_kws:
+                st.warning("언어 또는 카테고리를 선택해 주세요.")
+                st.stop()
+            keywords_to_search = selected_kws
+
+        all_ids: dict[str, str] = {}  # video_id → search_keyword
+        total = len(keywords_to_search)
+
+        progress_bar = st.progress(0, text="검색 준비 중...")
+        status_box = st.empty()
+
+        try:
+            for idx, kw in enumerate(keywords_to_search):
+                status_box.markdown(
+                    f"🔍 **{idx+1}/{total}** 검색 중: `{kw}` "
+                    f"| 수집된 영상: **{len(all_ids)}개**"
+                )
+                try:
+                    ids = search_ids(youtube, kw, duration_filter, sort_by,
+                                     max_results, pub_after,
+                                     max_pages=pages_arg)
+                    for vid in ids:
+                        if vid not in all_ids:
+                            all_ids[vid] = kw
+                except HttpError as e:
+                    if "quotaExceeded" in str(e):
+                        st.warning("⚠️ API 할당량 초과. 지금까지 수집된 결과를 표시합니다.")
+                        break
+                    continue
+
+                progress_bar.progress((idx + 1) / total,
+                                      text=f"진행: {idx+1}/{total} 키워드 | 수집: {len(all_ids)}개")
+                if total > 1:
+                    time.sleep(0.1)
+
+        except Exception as e:
+            st.error(f"검색 오류: {e}")
+            st.stop()
+
+        status_box.markdown(f"📥 **{len(all_ids)}개** 영상 상세정보 가져오는 중...")
+        progress_bar.progress(1.0, text="영상 정보 수집 중...")
+
+        try:
+            rows = fetch_details(youtube, list(all_ids.keys()))
+        except HttpError as e:
+            st.error(f"YouTube API 오류: {e}")
+            st.stop()
+
+        # 조회수 필터
+        if min_views > 0:
+            rows = [r for r in rows if r["조회수"] >= min_views]
+        if max_views > 0:
+            rows = [r for r in rows if r["조회수"] <= max_views]
+
+        # 등급순 정렬 (S→A→B→C, 같은 등급 내에서는 업로드 최신순)
+        grade_order = {"S": 0, "A": 1, "B": 2, "C": 3}
+        rows.sort(key=lambda r: (grade_order[r["등급"]], r["업로드경과일"]))
+
+        st.session_state.results = rows
+        progress_bar.empty()
+        status_box.empty()
+
+    # ── 결과 표시 ─────────────────────────────────────────────────────────────
+    rows = st.session_state.results
+
+    if not rows:
         st.markdown(
-            f"<div style='text-align:center;padding:80px 0;color:{t['text_secondary']};'>"
-            "<div style='font-size:56px;'>▶</div>"
-            f"<div style='font-size:18px;margin-top:16px;color:{t['text_secondary']};'>"
-            "검색어를 입력하고 <b style='color:#ff0000'>검색</b> 버튼을 클릭하세요</div>"
+            f"<div style='text-align:center;padding:80px 0;color:{t['sub']};'>"
+            "<div style='font-size:52px'>🔍</div>"
+            f"<div style='font-size:18px;margin-top:14px;color:{t['sub']};'>"
+            "사이드바에서 검색어 또는 키워드 DB를 선택하고<br>"
+            f"<b style='color:#ff0000'>검색</b> 버튼을 클릭하세요</div>"
+            f"<div style='margin-top:20px;font-size:13px;color:{t['sub']};line-height:1.8'>"
+            "🏆 S급: 구독자 1만↓ · 7일이내 · 조회수 1만↓<br>"
+            "⭐ A급: 구독자 5만↓ · 30일이내 · 조회수 5만↓<br>"
+            "🌱 B급: 구독자 20만↓ · 90일이내<br>"
+            "📺 C급: 대형 채널 / 오래된 영상</div>"
             "</div>",
             unsafe_allow_html=True,
         )
         return
 
-    if not api_key:
-        st.error("사이드바에 YouTube API 키를 입력해 주세요.")
-        return
-    if not keyword.strip():
-        st.warning("검색어를 입력해 주세요.")
-        return
+    # 등급 요약
+    render_grade_summary(rows, t)
 
-    try:
-        youtube = get_youtube_client(api_key)
-        if youtube is None:
-            st.error("API 키가 올바르지 않습니다. 다시 확인해 주세요.")
-            return
-        with st.spinner("유튜브에서 영상을 검색 중입니다..."):
-            video_ids = search_video_ids(
-                youtube, keyword.strip(), date_filter, duration_filter, sort_by, max_results
-            )
-            rows = fetch_video_details(youtube, video_ids)
-            rows = apply_view_filters(rows, int(min_views), int(max_views))
-    except HttpError as e:
-        st.error(f"YouTube API 오류: {e}")
-        return
-    except Exception as e:
-        st.error(f"오류가 발생했습니다: {e}")
-        return
+    total_count = len(rows)
+    st.markdown(
+        f"<p style='color:{t['sub']};font-size:14px;margin-bottom:12px'>"
+        f"총 <b style='color:{t['text']}'>{total_count}개</b> 영상 | "
+        f"등급순 정렬 (S → A → B → C)</p>",
+        unsafe_allow_html=True,
+    )
 
-    if not rows:
-        st.warning("검색 결과가 없습니다. 다른 키워드나 필터를 사용해 보세요.")
-        return
+    # 등급 필터
+    grade_filter = st.radio(
+        "등급 필터",
+        ["전체", "🏆 S급", "⭐ A급", "🌱 B급", "📺 C급"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    grade_map = {"전체": None, "🏆 S급": "S", "⭐ A급": "A", "🌱 B급": "B", "📺 C급": "C"}
+    filtered = [r for r in rows if grade_map[grade_filter] is None
+                or r["등급"] == grade_map[grade_filter]]
 
     st.markdown(
-        f"<p class='result-header'>검색어 <span class='keyword-hl'>'{keyword}'</span> — "
-        f"<b style='color:{t['text_primary']}'>{len(rows)}개</b> 결과</p>",
+        f"<p style='color:{t['sub']};font-size:13px;margin:4px 0 14px'>"
+        f"표시 중: <b style='color:{t['text']}'>{len(filtered)}개</b></p>",
         unsafe_allow_html=True,
     )
 
     tab1, tab2 = st.tabs(["🎬 카드 보기", "📋 테이블 보기"])
 
     with tab1:
-        for row in rows:
-            render_video_card(row)
+        for row in filtered:
+            render_card(row, t)
 
     with tab2:
-        df = pd.DataFrame(rows)
-        display_df = df.drop(columns=["썸네일"])
+        df = pd.DataFrame(filtered).drop(columns=["썸네일", "_channel_id"])
         st.dataframe(
-            display_df,
+            df,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "URL": st.column_config.LinkColumn("URL"),
-                "조회수": st.column_config.NumberColumn("조회수", format="%d"),
-                "좋아요": st.column_config.NumberColumn("좋아요", format="%d"),
-                "댓글수": st.column_config.NumberColumn("댓글수", format="%d"),
-                "구독자수": st.column_config.NumberColumn("구독자수", format="%d"),
+                "조회수": st.column_config.NumberColumn(format="%d"),
+                "좋아요": st.column_config.NumberColumn(format="%d"),
+                "댓글수": st.column_config.NumberColumn(format="%d"),
+                "구독자수": st.column_config.NumberColumn(format="%d"),
             },
         )
-        csv = display_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button(
-            label="📥 CSV로 다운로드",
+            "📥 CSV 다운로드",
             data=csv,
-            file_name=f"유튜브검색_{keyword.strip().replace(' ', '_')}.csv",
+            file_name="한국여행채널_발굴결과.csv",
             mime="text/csv",
             use_container_width=True,
         )
