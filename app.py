@@ -246,38 +246,59 @@ div[data-baseweb="select"]>div{
   60%,99%{ background-position:200% center; }
 }
 
-/* ── 등급 요약 ── */
+/* ── 등급 요약 그리드 ── */
+.grade-summary{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:18px;
+  margin-bottom:28px;
+}
 .grade-box{
-  border-radius:18px;
-  padding:22px 14px 18px;text-align:center;
+  border-radius:24px;
+  padding:42px 20px 36px;
+  text-align:center;
   border:2px solid;
   position:relative;overflow:hidden;
   cursor:pointer;
-  transition:transform .2s,box-shadow .2s;
+  min-height:240px;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  transition:transform .22s,filter .22s,box-shadow .22s;
 }
+/* 빛 스윕 오버레이 */
 .grade-box::before{
   content:'';position:absolute;inset:0;
-  background:linear-gradient(105deg,
-    transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%);
+  background:linear-gradient(110deg,
+    transparent 35%,rgba(255,255,255,.18) 50%,transparent 65%);
   background-size:250% 100%;
   animation:inherit;
   animation-name:snake-shine;
   pointer-events:none;
+  z-index:1;
 }
-.grade-box:hover{ filter:brightness(1.18); transform:translateY(-5px); }
-.grade-count{font-size:36px;font-weight:900;line-height:1}
-.grade-label{font-size:15px;font-weight:900;margin-top:7px;letter-spacing:.5px}
-.grade-desc{font-size:11px;opacity:.65;margin-top:4px;line-height:1.4}
+/* 상단 컬러 강조선 */
+.grade-box::after{
+  content:'';position:absolute;top:0;left:0;right:0;
+  height:4px;border-radius:24px 24px 0 0;
+  background:var(--gb-top-color, #fff);
+  opacity:.9;
+  z-index:2;
+}
+.grade-box > *{ position:relative;z-index:3; }
+.grade-box:hover{ filter:brightness(1.2); transform:translateY(-7px); }
+.grade-count{font-size:54px;font-weight:900;line-height:1;margin:10px 0 6px;}
+.grade-label{font-size:22px;font-weight:900;letter-spacing:.6px;}
+.grade-desc{font-size:13px;opacity:.65;margin-top:8px;line-height:1.5;}
 
 /* ── 등급 박스 투명 오버레이 버튼 ── */
 .gbox-btn-wrap{
-  margin-top:-195px!important;   /* 박스 위로 올려서 겹침 */
+  margin-top:-270px!important;
   position:relative;
   z-index:20;
-  height:195px;
+  height:270px;
 }
 .gbox-btn-wrap .stButton>button{
-  height:195px!important;
+  height:270px!important;
   background:transparent!important;
   border:none!important;
   color:transparent!important;
@@ -285,13 +306,13 @@ div[data-baseweb="select"]>div{
   cursor:pointer!important;
   font-size:0!important;
   padding:0!important;
-  border-radius:18px!important;
+  border-radius:24px!important;
 }
 .gbox-btn-wrap .stButton>button:hover{
-  background:rgba(255,255,255,.04)!important;
+  background:rgba(255,255,255,.05)!important;
 }
 .gbox-btn-wrap .stButton>button:active{
-  background:rgba(255,255,255,.09)!important;
+  background:rgba(255,255,255,.1)!important;
 }
 
 /* ── 비디오 카드 ── */
@@ -725,52 +746,59 @@ _SNAKE_CYCLE  = "2.8s"
 _SNAKE_DELAYS = {"S": "0s", "A": "0.7s", "B": "1.4s", "C": "2.1s"}
 _GRADE_LABEL  = {"S":"🏆 S급","A":"⭐ A급","B":"🌱 B급","C":"📺 C급"}
 
+# 등급별 그라데이션 배경
+_GRADE_BG = {
+    "S": "linear-gradient(160deg,#3d2800 0%,#1e1000 45%,#0d0800 100%)",
+    "A": "linear-gradient(160deg,#002840 0%,#001220 45%,#000810 100%)",
+    "B": "linear-gradient(160deg,#0d2e0d 0%,#071507 45%,#030a03 100%)",
+    "C": "linear-gradient(160deg,#1e2e38 0%,#101820 45%,#080e14 100%)",
+}
+
 def render_grade_summary(rows):
-    counts  = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
-    cur     = st.session_state.get("gf", "전체")   # 현재 선택된 필터
+    counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
+    cur    = st.session_state.get("gf", "전체")
 
-    # 4열 그리드로 배치
-    cols = st.columns(4, gap="small")
-    for col, (g, cfg) in zip(cols, GRADES.items()):
+    # ── 순수 HTML 4열 그리드 ──────────────────────────────────────────────────
+    boxes_html = ""
+    for g, cfg in GRADES.items():
+        icon_img = e3d(cfg["icon"], size=66)
+        delay    = _SNAKE_DELAYS[g]
+        anim     = f"snake-pulse {_SNAKE_CYCLE} ease-in-out {delay} infinite"
+        is_sel   = (cur == _GRADE_LABEL[g])
+        bg       = _GRADE_BG[g]
+        sel_ring = (f"outline:4px solid {cfg['color']};outline-offset:4px;"
+                    f"box-shadow:0 0 32px {cfg['color']}77;" if is_sel else "")
+        sel_badge = (
+            f"<div style='margin-top:10px;font-size:13px;font-weight:900;"
+            f"color:{cfg['color']};background:{cfg['color']}22;"
+            f"border-radius:20px;padding:4px 14px;display:inline-block;'>"
+            f"✓ 선택됨</div>" if is_sel else ""
+        )
+        boxes_html += (
+            f'<div class="grade-box" id="gbox-{g}" style="'
+            f'border-color:{cfg["border"]};background:{bg};'
+            f'--gb-top-color:{cfg["color"]};animation:{anim};{sel_ring}">'
+            f'<div style="filter:drop-shadow(0 0 12px {cfg["color"]}99);">{icon_img}</div>'
+            f'<div class="grade-count" style="color:{cfg["color"]};'
+            f'text-shadow:0 0 20px {cfg["color"]}88;">{counts[g]}</div>'
+            f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
+            f'<div class="grade-desc">{cfg["desc"]}</div>'
+            f'{sel_badge}'
+            f'</div>'
+        )
+    st.markdown(f'<div class="grade-summary">{boxes_html}</div>',
+                unsafe_allow_html=True)
+
+    # ── 클릭용 투명 버튼 행 (HTML 박스 바로 아래 음수 마진으로 겹침) ──────────
+    btn_cols = st.columns(4, gap="small")
+    for col, (g, cfg) in zip(btn_cols, GRADES.items()):
         with col:
-            is_sel   = (cur == _GRADE_LABEL[g])
-            icon_img = e3d(cfg["icon"], size=44)
-            delay    = _SNAKE_DELAYS[g]
-            anim     = f"snake-pulse {_SNAKE_CYCLE} ease-in-out {delay} infinite"
-            sel_ring = (f"outline:3px solid {cfg['color']};"
-                        f"outline-offset:3px;"
-                        f"box-shadow:0 0 24px {cfg['color']}66;" if is_sel else "")
-
-            # ── 시각적 박스 (HTML) ──
-            st.markdown(
-                f'<div class="grade-box" style="'
-                f'border-color:{cfg["border"]};background:{cfg["bg"]};'
-                f'animation:{anim};{sel_ring}cursor:pointer;">'
-                f'<div style="line-height:1;margin-bottom:8px;'
-                f'filter:drop-shadow(0 0 8px {cfg["color"]}88);">{icon_img}</div>'
-                f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
-                f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
-                f'<div class="grade-desc">{cfg["desc"]}</div>'
-                f'{"<div style=\'font-size:11px;margin-top:6px;color:"+cfg["color"]+";font-weight:900;\'>✓ 선택됨</div>" if is_sel else ""}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            # ── 투명 오버레이 버튼 (클릭 감지) ──
-            # CSS 로 박스 위로 끌어 올려 겹치게 함
-            st.markdown(
-                f'<div class="gbox-btn-wrap" data-g="{g}">',
-                unsafe_allow_html=True,
-            )
-            clicked = st.button("　", key=f"gb_{g}",
-                                use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            if clicked:
-                # 이미 선택된 등급 클릭 → 전체로 해제
-                st.session_state.gf = ("전체" if is_sel
-                                       else _GRADE_LABEL[g])
+            st.markdown('<div class="gbox-btn-wrap">', unsafe_allow_html=True)
+            if st.button("　", key=f"gb_{g}", use_container_width=True):
+                is_sel = (st.session_state.get("gf","전체") == _GRADE_LABEL[g])
+                st.session_state.gf = "전체" if is_sel else _GRADE_LABEL[g]
                 st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ── 페이지: 로그인 ─────────────────────────────────────────────────────────────
