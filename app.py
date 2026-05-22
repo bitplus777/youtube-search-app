@@ -248,31 +248,37 @@ div[data-baseweb="select"]>div{
   60%,99%{ background-position:200% center; }
 }
 
-/* ── 등급 요약 그리드 ── */
+/* ── 등급 요약 가로 배열 ── */
 .grade-summary{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:18px;
-  margin-bottom:28px;
+  display:flex!important;
+  flex-direction:row!important;
+  flex-wrap:nowrap!important;
+  gap:16px!important;
+  margin-bottom:28px!important;
+  width:100%!important;
+  box-sizing:border-box!important;
 }
 .grade-box{
-  border-radius:24px;
-  padding:42px 20px 36px;
-  text-align:center;
-  border:2px solid;
-  position:relative;overflow:hidden;
-  cursor:pointer;
-  min-height:240px;
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
-  transition:transform .22s,filter .22s,box-shadow .22s;
+  flex:1 1 0!important;
+  min-width:0!important;
+  border-radius:24px!important;
+  padding:42px 16px 36px!important;
+  text-align:center!important;
+  border:2px solid!important;
+  position:relative!important;overflow:hidden!important;
+  cursor:pointer!important;
+  min-height:240px!important;
+  display:flex!important;flex-direction:column!important;
+  align-items:center!important;justify-content:center!important;
+  transition:transform .22s,filter .22s,box-shadow .22s!important;
+  box-sizing:border-box!important;
 }
 /* 빛 스윕 오버레이 */
 .grade-box::before{
   content:'';position:absolute;inset:0;
   background:linear-gradient(110deg,
-    transparent 35%,rgba(255,255,255,.18) 50%,transparent 65%);
-  background-size:250% 100%;
+    transparent 30%,rgba(255,255,255,.25) 50%,transparent 70%);
+  background-size:260% 100%;
   animation:inherit;
   animation-name:snake-shine;
   pointer-events:none;
@@ -281,10 +287,11 @@ div[data-baseweb="select"]>div{
 /* 상단 컬러 강조선 */
 .grade-box::after{
   content:'';position:absolute;top:0;left:0;right:0;
-  height:4px;border-radius:24px 24px 0 0;
+  height:5px;border-radius:24px 24px 0 0;
   background:var(--gb-top-color, #fff);
-  opacity:.9;
+  opacity:1;
   z-index:2;
+  box-shadow:0 0 12px var(--gb-top-color, #fff);
 }
 .grade-box > *{ position:relative;z-index:3; }
 .grade-box:hover{ filter:brightness(1.2); transform:translateY(-7px); }
@@ -294,13 +301,13 @@ div[data-baseweb="select"]>div{
 
 /* ── 등급 박스 투명 오버레이 버튼 ── */
 .gbox-btn-wrap{
-  margin-top:-270px!important;
+  margin-top:-280px!important;
   position:relative;
   z-index:20;
-  height:270px;
+  height:280px;
 }
 .gbox-btn-wrap .stButton>button{
-  height:270px!important;
+  height:280px!important;
   background:transparent!important;
   border:none!important;
   color:transparent!important;
