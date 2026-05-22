@@ -1,6 +1,5 @@
-"""로그인 / 회원가입 / 세션 관리"""
+"""인증 - Google OAuth + API 키 관리 (이메일 별 저장)"""
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -21,56 +20,41 @@ def _save(data: dict):
     )
 
 
-def _hash(pw: str) -> str:
-    return hashlib.sha256(pw.encode("utf-8")).hexdigest()
-
-
-# ── 공개 API ──────────────────────────────────────────────────────────────────
-def has_users() -> bool:
-    return bool(_load().get("users"))
-
-
-def register(username: str, password: str) -> tuple[bool, str]:
-    username = username.strip()
-    if not username or not password:
-        return False, "사용자명과 비밀번호를 입력해 주세요."
+# ── Google OAuth 사용자 등록/조회 ──────────────────────────────────────────────
+def ensure_google_user(email: str, display_name: str = "") -> None:
+    """Google 로그인 시 사용자 레코드가 없으면 자동 생성."""
     data = _load()
-    users: list = data.get("users", [])
-    if any(u["username"] == username for u in users):
-        return False, "이미 존재하는 사용자명입니다."
-    users.append({"username": username, "password": _hash(password)})
-    data["users"] = users
+    users: dict = data.get("google_users", {})
+    if email not in users:
+        users[email] = {"display_name": display_name, "api_keys": []}
+    elif display_name and not users[email].get("display_name"):
+        users[email]["display_name"] = display_name
+    data["google_users"] = users
     _save(data)
-    return True, "가입 완료!"
 
 
-def verify(username: str, password: str) -> bool:
-    username = username.strip()
+def get_display_name(email: str) -> str:
     data = _load()
-    for u in data.get("users", []):
-        if u["username"] == username and u["password"] == _hash(password):
-            return True
-    return False
+    return data.get("google_users", {}).get(email, {}).get("display_name", email)
 
 
-def change_password(username: str, old_pw: str, new_pw: str) -> tuple[bool, str]:
-    if not verify(username, old_pw):
-        return False, "현재 비밀번호가 틀렸습니다."
+# ── API 키 관리 (이메일 기반) ──────────────────────────────────────────────────
+def load_api_keys(email: str = "default") -> list[str]:
     data = _load()
-    for u in data.get("users", []):
-        if u["username"] == username:
-            u["password"] = _hash(new_pw)
-            _save(data)
-            return True, "비밀번호가 변경되었습니다."
-    return False, "사용자를 찾을 수 없습니다."
-
-
-def load_api_keys() -> list[str]:
-    keys = _load().get("api_keys", [])
+    # 신규 구조: google_users[email]["api_keys"]
+    if email in data.get("google_users", {}):
+        keys = data["google_users"][email].get("api_keys", [])
+    else:
+        # 구버전 호환 (비밀번호 로그인 사용자)
+        keys = data.get("api_keys", [])
     return (keys + [""] * 5)[:5]
 
 
-def save_api_keys(keys: list[str]):
+def save_api_keys(keys: list[str], email: str = "default"):
     data = _load()
-    data["api_keys"] = [k.strip() for k in keys]
+    clean = [k.strip() for k in keys]
+    if email in data.get("google_users", {}):
+        data["google_users"][email]["api_keys"] = clean
+    else:
+        data["api_keys"] = clean
     _save(data)

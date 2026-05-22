@@ -813,50 +813,97 @@ def render_grade_summary(rows):
 # ── 페이지: 로그인 ─────────────────────────────────────────────────────────────
 def page_login():
     st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
-    st.markdown("""
-<div class="login-wrap">
-  <div class="login-logo">
-    <h1>🔍 채널 <span>발굴기</span></h1>
-    <p>한국 여행 채널 분석 · 등급 분류 · 기록 관리</p>
-  </div>
-</div>""", unsafe_allow_html=True)
+
+    # ── Google OAuth 설정 읽기 ────────────────────────────────────────────────
+    try:
+        _gcfg        = st.secrets["google"]
+        CLIENT_ID    = _gcfg["client_id"]
+        CLIENT_SECRET= _gcfg["client_secret"]
+        REDIRECT_URI = _gcfg.get("redirect_uri", "http://localhost:8501")
+        _google_ok   = True
+    except Exception:
+        _google_ok = False
+
+    # ── 로고 영역 ─────────────────────────────────────────────────────────────
+    st.markdown(
+        "<div style='text-align:center;padding:60px 0 30px;'>"
+        f"<div style='font-size:56px;font-weight:900;color:#f0f0f0;line-height:1;'>"
+        f"🔍 채널 <span style='color:#e53935;'>발굴기</span></div>"
+        "<div style='font-size:16px;color:#555;margin-top:12px;letter-spacing:1.5px;"
+        "font-weight:700;text-transform:uppercase;'>YOUTUBE CHANNEL FINDER</div>"
+        "<div style='font-size:14px;color:#444;margin-top:10px;'>한국 여행 채널 분석 · 등급 분류 · 기록 관리</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
-        if not auth.has_users():
-            st.info("처음 사용하시나요? 아래에서 계정을 만들어 시작하세요.", icon="👋")
-            tab_login, tab_reg = st.tabs(["🔑 로그인", "📝 회원가입"])
-        else:
-            tab_login, tab_reg = st.tabs(["🔑 로그인", "📝 회원가입"])
+        if _google_ok:
+            # ── Google OAuth 버튼 ─────────────────────────────────────────────
+            from streamlit_oauth import OAuth2Component
+            import jwt as _jwt
 
-        with tab_login:
-            with st.form("login_form"):
-                u = st.text_input("사용자명", placeholder="username")
-                p = st.text_input("비밀번호", type="password", placeholder="••••••••")
-                ok = st.form_submit_button("로그인", type="primary", use_container_width=True)
-            if ok:
-                if auth.verify(u, p):
-                    st.session_state.logged_in = True
-                    st.session_state.username = u
-                    st.rerun()
-                else:
-                    st.error("사용자명 또는 비밀번호가 틀렸습니다.")
+            oauth2 = OAuth2Component(
+                CLIENT_ID, CLIENT_SECRET,
+                "https://accounts.google.com/o/oauth2/v2/auth",
+                "https://oauth2.googleapis.com/token",
+                "https://oauth2.googleapis.com/token",
+                "https://oauth2.googleapis.com/revoke",
+            )
 
-        with tab_reg:
-            with st.form("reg_form"):
-                nu = st.text_input("사용자명", placeholder="원하는 사용자명", key="reg_u")
-                np = st.text_input("비밀번호", type="password", placeholder="••••••••", key="reg_p")
-                np2 = st.text_input("비밀번호 확인", type="password", placeholder="••••••••", key="reg_p2")
-                ok2 = st.form_submit_button("계정 만들기", type="primary", use_container_width=True)
-            if ok2:
-                if np != np2:
-                    st.error("비밀번호가 일치하지 않습니다.")
-                else:
-                    ok3, msg = auth.register(nu, np)
-                    if ok3:
-                        st.success(msg + " 이제 로그인해 주세요.")
+            st.markdown(
+                "<div style='background:#161616;border:1px solid #2a2a2a;"
+                "border-radius:18px;padding:36px 28px;text-align:center;'>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='font-size:20px;font-weight:800;color:#f0f0f0;"
+                "margin-bottom:8px;'>Google 계정으로 로그인</p>"
+                "<p style='font-size:13px;color:#555;margin-bottom:24px;'>"
+                "별도 회원가입 없이 구글 계정으로 바로 시작하세요</p>",
+                unsafe_allow_html=True,
+            )
+
+            result = oauth2.authorize_button(
+                name="  Google로 로그인",
+                icon="https://www.google.com/favicon.ico",
+                redirect_uri=REDIRECT_URI,
+                scope="openid email profile",
+                key="google_oauth_btn",
+                extras_params={"prompt": "select_account"},
+                use_container_width=True,
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            if result and "token" in result:
+                try:
+                    id_token = result["token"].get("id_token", "")
+                    payload  = _jwt.decode(id_token,
+                                           options={"verify_signature": False})
+                    email    = payload.get("email", "")
+                    name     = payload.get("name", email)
+                    if email:
+                        auth.ensure_google_user(email, name)
+                        st.session_state.logged_in      = True
+                        st.session_state.username       = email
+                        st.session_state.display_name   = name
+                        st.session_state.api_keys_raw   = auth.load_api_keys(email)
+                        st.rerun()
                     else:
-                        st.error(msg)
+                        st.error("이메일을 가져올 수 없습니다. 다시 시도해 주세요.")
+                except Exception as _e:
+                    st.error(f"로그인 처리 오류: {_e}")
+        else:
+            # ── Google OAuth 미설정 시 안내 ────────────────────────────────────
+            st.warning(
+                "⚙️ Google OAuth가 설정되지 않았습니다.\n\n"
+                "`.streamlit/secrets.toml` 파일에 아래 내용을 추가하세요:\n\n"
+                "```toml\n[google]\nclient_id = \"YOUR_CLIENT_ID\"\n"
+                "client_secret = \"YOUR_CLIENT_SECRET\"\n"
+                "redirect_uri = \"http://localhost:8501\"\n```",
+            )
+            st.info("👉 [Google Cloud Console](https://console.cloud.google.com/) → "
+                    "API 및 서비스 → 사용자 인증 정보 → OAuth 2.0 클라이언트 ID 생성")
 
 
 # ── 사이드바 내비 ──────────────────────────────────────────────────────────────
@@ -978,66 +1025,107 @@ def render_sidebar(username: str):
 
 # ── 상단 바 ───────────────────────────────────────────────────────────────────
 def render_topbar(title: str, username: str):
-    q = get_today_quota()
-    used = q["units"]
-    remaining = DAILY_QUOTA - used
-    pct = min(used / DAILY_QUOTA * 100, 100)
-    chip_color = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#4CAF50"
-    initials = username[:2].upper() if username else "?"
-    person_icon = e3d("👤", size=16)
-    key_icon    = e3d("🔑", size=15)
-    chart_icon  = e3d("📊", size=15)
+    q            = get_today_quota()
+    used         = q["units"]
+    remaining    = DAILY_QUOTA - used
+    pct          = min(used / DAILY_QUOTA * 100, 100)
+    quota_color  = "#e53935" if pct > 80 else "#FFD700" if pct > 50 else "#C8F04A"
+    display_name = st.session_state.get("display_name", username)
+    short_name   = display_name.split("@")[0][:16] if "@" in display_name else display_name[:16]
+    initials     = short_name[:2].upper() if short_name else "?"
+    page         = st.session_state.get("page", "search")
 
-    tb_left, tb_right = st.columns([6, 4])
+    # 현재 모드 배지 레이블
+    _mode_labels = {
+        "search":"빠른 검색","custom_kw":"나만의 키워드",
+        "db_search":"DB 검색","history":"검색 기록",
+        "mypage":"마이페이지","apikeys":"API 키",
+    }
+    mode_label = _mode_labels.get(page, "채널 발굴기")
+
+    tb_left, tb_right = st.columns([5, 5])
+
     with tb_left:
         st.markdown(
-            f"<div style='padding:10px 0 14px;border-bottom:1px solid #1e1e1e;'>"
-            f"<div style='font-size:21px;font-weight:900;color:#f0f0f0;'>{title}</div>"
+            f"<div style='padding:11px 0 13px;'>"
+            f"<div style='font-size:20px;font-weight:900;color:#f0f0f0;'>{title}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
+
     with tb_right:
-        st.markdown("<div style='padding:6px 0 0;'>", unsafe_allow_html=True)
-        rc1, rc2 = st.columns([5, 3])
-        with rc1:
-            st.markdown(
-                f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:20px;"
-                f"padding:7px 14px;font-size:12px;font-weight:700;color:#aaa;"
-                f"display:flex;align-items:center;gap:6px;white-space:nowrap;'>"
-                f"{chart_icon} 쿼타 <b style='color:{chip_color}'>{used:,}</b>"
-                f"<span style='color:#4CAF50;'>(잔여 {remaining:,})</span></div>",
-                unsafe_allow_html=True,
-            )
-        with rc2:
+        # ── HTML 배지 묶음 (모드 배지 · 잔여쿼타 · 충전버튼) ──
+        st.markdown(
+            f"<div style='display:flex;align-items:center;justify-content:flex-end;"
+            f"gap:8px;padding:9px 0 9px;flex-wrap:nowrap;'>"
+
+            # ① 현재 모드 배지
+            f"<div style='background:#1e1e1e;border:1px solid #333;border-radius:20px;"
+            f"padding:6px 14px;font-size:12px;font-weight:800;color:#e53935;"
+            f"white-space:nowrap;letter-spacing:.3px;'>{mode_label}</div>"
+
+            # ② 잔여 쿼타
+            f"<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:20px;"
+            f"padding:6px 14px;font-size:12px;font-weight:800;"
+            f"color:{quota_color};white-space:nowrap;'>"
+            f"{remaining:,} <span style='font-size:10px;color:#555;font-weight:600;'>잔여</span></div>"
+
+            # ③ + API키 버튼 (황금색)
+            f"<div id='topbar-apikey-trigger' style='background:#C8F04A;border-radius:20px;"
+            f"padding:6px 14px;font-size:12px;font-weight:900;color:#111;"
+            f"white-space:nowrap;cursor:pointer;'>+ API 키</div>"
+
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        # ── 아이콘 버튼들 + 프로필 팝오버 ──
+        ic1, ic2, prof_col = st.columns([1, 1, 4])
+        with ic1:
+            if st.button("⚙️", key="tb_settings", help="API 키 관리",
+                         use_container_width=True):
+                st.session_state.page = "apikeys"; st.rerun()
+        with ic2:
+            if st.button("🔄", key="tb_refresh", help="결과 초기화",
+                         use_container_width=True):
+                st.session_state.results = []; st.rerun()
+        with prof_col:
             with st.popover(
-                f"👤 {username}",
+                f"🔴 {short_name}  ▾",
                 use_container_width=True,
             ):
                 st.markdown(
-                    f"<div style='padding:4px 0 10px;'>"
-                    f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px;"
-                    f"padding-bottom:10px;border-bottom:1px solid #2a2a2a;'>"
-                    f"<div style='width:40px;height:40px;border-radius:50%;"
-                    f"background:linear-gradient(135deg,#e53935,#b71c1c);"
+                    f"<div style='padding:6px 0 12px;'>"
+                    f"<div style='display:flex;align-items:center;gap:12px;"
+                    f"margin-bottom:14px;padding-bottom:12px;"
+                    f"border-bottom:1px solid #2a2a2a;'>"
+                    f"<div style='width:46px;height:46px;border-radius:50%;"
+                    f"background:linear-gradient(135deg,#e53935,#7f0000);"
                     f"display:flex;align-items:center;justify-content:center;"
-                    f"font-size:16px;font-weight:900;color:#fff;flex-shrink:0;'>{initials}</div>"
-                    f"<div><div style='font-size:14px;font-weight:800;color:#f0f0f0;'>{username}</div>"
-                    f"<div style='font-size:11px;color:#555;'>로그인됨</div></div></div>"
-                    f"</div>",
+                    f"font-size:19px;font-weight:900;color:#fff;"
+                    f"flex-shrink:0;box-shadow:0 0 12px rgba(229,57,53,.5);'>"
+                    f"{initials}</div>"
+                    f"<div>"
+                    f"<div style='font-size:14px;font-weight:800;color:#f0f0f0;"
+                    f"max-width:160px;overflow:hidden;text-overflow:ellipsis;"
+                    f"white-space:nowrap;'>{display_name}</div>"
+                    f"<div style='font-size:11px;color:#4CAF50;margin-top:2px;'>"
+                    f"✓ Google 로그인됨</div>"
+                    f"</div></div></div>",
                     unsafe_allow_html=True,
                 )
-                if st.button(f"{person_icon} 마이페이지", use_container_width=True,
-                             key="pop_mypage"):
+                if st.button("👤  마이페이지", use_container_width=True, key="pop_mypage"):
                     st.session_state.page = "mypage"; st.rerun()
-                if st.button(f"{key_icon} API 키 관리", use_container_width=True,
-                             key="pop_apikeys"):
+                if st.button("🔑  API 키 관리", use_container_width=True, key="pop_apikeys"):
                     st.session_state.page = "apikeys"; st.rerun()
-                st.markdown("<hr style='border-color:#2a2a2a;margin:6px 0'>", unsafe_allow_html=True)
-                if st.button("🚪 로그아웃", use_container_width=True, key="pop_logout"):
-                    st.session_state.logged_in = False
-                    st.session_state.username = ""
+                st.markdown("<hr style='border-color:#2a2a2a;margin:8px 0'>",
+                            unsafe_allow_html=True)
+                if st.button("🚪  로그아웃", use_container_width=True, key="pop_logout"):
+                    for k in ("logged_in","username","display_name","api_keys_raw",
+                              "results","auto_saved_sid","auto_saved_name"):
+                        st.session_state.pop(k, None)
                     st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("<div style='border-bottom:1px solid #1e1e1e;margin-bottom:18px;'></div>",
                 unsafe_allow_html=True)
 
