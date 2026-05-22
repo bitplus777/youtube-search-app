@@ -234,16 +234,44 @@ div[data-baseweb="select"]>div{
 .app-card:hover{border-color:#333;box-shadow:0 4px 20px rgba(0,0,0,.3)}
 
 /* ── 등급 요약 ── */
-.grade-summary{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
-.grade-box{
-  flex:1;min-width:120px;border-radius:14px;
-  padding:16px;text-align:center;border:1px solid;
-  transition:transform .2s,box-shadow .2s;
+/* ── 뱀 빛 흐름 keyframes ── */
+@keyframes snake-pulse {
+  0%,100%{ filter:brightness(.65) saturate(.6); transform:translateY(2px) scale(.97); }
+  30%    { filter:brightness(1.35) saturate(1.6); transform:translateY(-5px) scale(1.04); }
+  60%    { filter:brightness(.65) saturate(.6); transform:translateY(2px) scale(.97); }
 }
-.grade-box:hover{transform:translateY(-3px)}
-.grade-count{font-size:30px;font-weight:900;line-height:1}
-.grade-label{font-size:13px;font-weight:800;margin-top:5px;letter-spacing:.4px}
-.grade-desc{font-size:10px;opacity:.55;margin-top:3px;line-height:1.4}
+@keyframes snake-shine {
+  0%,100%{ background-position:-200% center; }
+  30%    { background-position:200% center; }
+  60%,99%{ background-position:200% center; }
+}
+
+/* ── 등급 요약 ── */
+.grade-summary{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px;margin-bottom:24px;
+}
+.grade-box{
+  border-radius:18px;
+  padding:22px 14px 18px;text-align:center;
+  border:2px solid;
+  position:relative;overflow:hidden;
+  cursor:default;
+}
+.grade-box::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(105deg,
+    transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%);
+  background-size:250% 100%;
+  animation:inherit;
+  animation-name:snake-shine;
+  pointer-events:none;
+}
+.grade-box:hover{ filter:brightness(1.15)!important; transform:translateY(-4px)!important; }
+.grade-count{font-size:36px;font-weight:900;line-height:1}
+.grade-label{font-size:15px;font-weight:900;margin-top:7px;letter-spacing:.5px}
+.grade-desc{font-size:11px;opacity:.65;margin-top:4px;line-height:1.4}
 
 /* ── 비디오 카드 ── */
 .video-card{
@@ -253,10 +281,13 @@ div[data-baseweb="select"]>div{
 .video-card:hover{transform:translateY(-3px)}
 .card-inner{display:flex;align-items:stretch}
 .thumb-wrap{
-  flex:0 0 240px;position:relative;overflow:hidden;
-  border-radius:14px 0 0 14px;background:#000;
+  flex:0 0 240px;min-height:155px;position:relative;overflow:hidden;
+  border-radius:14px 0 0 14px;background:#111;
 }
-.thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .35s}
+.thumb-wrap img{
+  width:100%;height:100%;min-height:155px;
+  object-fit:cover;display:block;transition:transform .35s;
+}
 .video-card:hover .thumb-wrap img{transform:scale(1.06)}
 .dur-badge{
   position:absolute;bottom:7px;right:7px;
@@ -585,14 +616,33 @@ def fetch_details(yt, video_ids):
 
 
 # ── 렌더링 ────────────────────────────────────────────────────────────────────
+def _video_id(url: str) -> str:
+    """URL에서 YouTube 영상 ID 추출"""
+    if "shorts/" in url:
+        return url.split("shorts/")[-1].split("?")[0]
+    if "v=" in url:
+        return url.split("v=")[-1].split("&")[0]
+    return url.split("/")[-1].split("?")[0]
+
 def render_card(row):
     g = GRADES[row["등급"]]
-    thumb = row["썸네일"]
     short = row.get("_is_short", False)
+
+    # 항상 video ID 로 직접 URL 조합 (API 썸네일 필드가 비어도 작동)
+    vid_id = _video_id(row.get("URL", ""))
+    thumb_api = row.get("썸네일", "")
+    thumb = thumb_api or (f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg" if vid_id else "")
+    # maxresdefault → hqdefault 순서로 fallback
+    fallback_src = f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"
+
     ts = "width:100%;height:100%;object-fit:cover;display:block;" + ("aspect-ratio:9/16;" if short else "")
-    th = (f'<img src="{thumb}" alt="" style="{ts}">' if thumb
-          else '<div style="background:#1a1a1a;width:100%;height:155px;display:flex;'
-               'align-items:center;justify-content:center;font-size:36px;">🎬</div>')
+    th = (
+        f'<img src="{thumb}" alt="" style="{ts}"'
+        f' onerror="this.onerror=null;this.src=\'{fallback_src}\'">'
+        if thumb else
+        '<div style="background:#1a1a1a;width:100%;height:160px;display:flex;'
+        'align-items:center;justify-content:center;font-size:40px;">🎬</div>'
+    )
     cb = "background:#FF0076;color:#fff;" if short else "background:#1a73e8;color:#fff;"
     cl = "🩳 숏폼" if short else "🎬 롱폼"
     g_icon = e3d(g["icon"], size=16)
@@ -649,23 +699,29 @@ def render_card(row):
 </div>""", unsafe_allow_html=True)
 
 
-GRADE_ANIM = {"S":"gold-pulse 2s ease-in-out infinite",
-              "A":"cyan-pulse 2.5s ease-in-out infinite",
-              "B":"green-pulse 3s ease-in-out infinite",
-              "C":"none"}
+# S→A→B→C 순서로 빛이 흘러가는 딜레이 (사이클 2.8s, 간격 0.7s)
+_SNAKE_CYCLE  = "2.8s"
+_SNAKE_DELAYS = {"S": "0s", "A": "0.7s", "B": "1.4s", "C": "2.1s"}
 
 def render_grade_summary(rows):
     counts = {g: sum(1 for r in rows if r["등급"]==g) for g in "SABC"}
     boxes = ""
     for g, cfg in GRADES.items():
-        icon_img = e3d(cfg["icon"], size=40)
-        anim = GRADE_ANIM[g]
-        boxes += (f'<div class="grade-box" style="border-color:{cfg["border"]};'
-                  f'background:{cfg["bg"]};animation:{anim};">'
-                  f'<div style="line-height:1;margin-bottom:6px;">{icon_img}</div>'
-                  f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
-                  f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
-                  f'<div class="grade-desc">{cfg["desc"]}</div></div>')
+        icon_img = e3d(cfg["icon"], size=44)
+        delay    = _SNAKE_DELAYS[g]
+        # snake-pulse: 밝기/크기 파동  /  snake-shine: ::before 빛줄기
+        anim = (f"snake-pulse {_SNAKE_CYCLE} ease-in-out {delay} infinite")
+        boxes += (
+            f'<div class="grade-box" style="'
+            f'border-color:{cfg["border"]};background:{cfg["bg"]};'
+            f'animation:{anim};">'
+            f'<div style="line-height:1;margin-bottom:8px;'
+            f'filter:drop-shadow(0 0 8px {cfg["color"]}88);">{icon_img}</div>'
+            f'<div class="grade-count" style="color:{cfg["color"]}">{counts[g]}</div>'
+            f'<div class="grade-label" style="color:{cfg["color"]}">{cfg["label"]}</div>'
+            f'<div class="grade-desc">{cfg["desc"]}</div>'
+            f'</div>'
+        )
     st.markdown(f'<div class="grade-summary">{boxes}</div>', unsafe_allow_html=True)
 
 
